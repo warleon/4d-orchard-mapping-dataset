@@ -5,7 +5,6 @@
 
     <rosparam command="load" file="$(find faster_lio)/config/ouster128.yaml" />
 
-    <!-- launch faster-lio -->
     <param name="feature_extract_enable" type="bool" value="0"/>
     <param name="point_filter_num_" type="int" value="4"/>
     <param name="max_iteration" type="int" value="3" />
@@ -15,18 +14,8 @@
     <param name="runtime_pos_log_enable" type="bool" value="0" />
     <node pkg="faster_lio" type="run_mapping_online" name="laserMapping" output="screen" /> 
 
-    <!-- launch driver to get pointcloud from ouster -->
-    <include file="$(find ouster_ros)/launch/replay.launch">
-        <arg name="ouster_ns" value="ouster" />
-        <arg name="metadata" value="$(dirname)/../../../../metadata/ouster_metadata.json" />
-        <arg name="timestamp_mode" value="TIME_FROM_ROS_TIME" />
-        <arg name="viz" value="false" />
-    </include>
+    <!-- <node pkg="tf2_ros" type="static_transform_publisher" name="lidar2camera" args="0.11506135 -0.04801469 -0.08219188 0.70710678 0.         0.70710678 0.  body camera"/> -->
 
-    <!-- publish tf from lidar to camera -->
-    <node pkg="tf2_ros" type="static_transform_publisher" name="lidar2camera" args="0.11506135 -0.04801469 -0.08219188 0.7063663 -0.0005764 0.707846 -0.0005755 body camera"/>
-
-    <!-- rviz -->
     <group if="$(arg rviz)">
         <node launch-prefix="nice" pkg="rviz" type="rviz" name="rviz" args="-d $(find faster_lio)/rviz_cfg/fusion_test.rviz" />
     </group>
