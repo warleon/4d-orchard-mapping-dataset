@@ -17,7 +17,7 @@
     <!-- <node pkg="tf2_ros" type="static_transform_publisher" name="lidar2camera" args="0.11506135 -0.04801469 -0.08219188 0.70710678 0.         0.70710678 0.  body camera"/> -->
 
     <group if="$(arg rviz)">
-        <node launch-prefix="nice" pkg="rviz" type="rviz" name="rviz" args="-d $(find faster_lio)/rviz_cfg/fusion_test.rviz" />
+        <node launch-prefix="nice" pkg="rviz" type="rviz" name="rviz" args="-d $(find faster_lio)/config/rviz/faster_lio.rviz" />
     </group>
 
 </launch>

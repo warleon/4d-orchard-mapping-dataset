@@ -1,0 +1,7 @@
+cam0:
+  camera_model: pinhole
+  intrinsics: [1431.7, 1431.67, 1254.38, 1038.96]
+  distortion_model: radtan
+  distortion_coeffs: [-0.0283121, 0.0331514, -0.000552672, -0.00187894]
+  resolution: [2048, 2448]
+  rostopic: /spinnaker/image_raw

@@ -31,6 +31,16 @@
                   rosFinal: rosPrev: {
                     ouster-ros = rosFinal.callPackage ./nix/ouster-ros.nix { };
                     faster-lio = rosFinal.callPackage ./nix/faster-lio.nix { };
+                    # ros_numpy 0.0.5 (last release, 2019) uses the bare `np.float`
+                    # alias, removed in NumPy 2.0. Patch it at the source instead of
+                    # pinning an ancient numpy, since numpy is shared with kalibr's
+                    # numpy_eigen elsewhere in this shell.
+                    ros-numpy = rosPrev.ros-numpy.overrideAttrs (old: {
+                      postPatch = (old.postPatch or "") + ''
+                        substituteInPlace src/ros_numpy/point_cloud2.py \
+                          --replace-fail "dtype=np.float)" "dtype=float)"
+                      '';
+                    });
                   }
                 );
               };
@@ -47,6 +57,14 @@
                   hash = "sha256-421K3q//HvvIybS5ZMRaQgjDW+zcDWp09DglVgQmAZw=";
                 };
               });
+              # Rebuild top-level pcl against the same Boost that rosPackages.noetic is
+              # built against (boost186), instead of nixpkgs' default (currently 1.87).
+              # nix-ros-overlay's pcl-ros/pcl-conversions pull PCL via this same `final`
+              # fixpoint, so this keeps every Boost in the environment at one version --
+              # otherwise CMAKE_PREFIX_PATH ends up with two Boost installs and
+              # find_package(Boost COMPONENTS python...) (e.g. kalibr's numpy_eigen)
+              # resolves against whichever version has no matching boost_python build.
+              pcl = prev.pcl.override { boost = final.rosPackages.noetic.boost186; };
             })
           ];
           config = {
@@ -98,11 +116,48 @@
             pkgs.tbb
             pkgs.opencv
             pkgs.curl
-            pkgs.boost
+            # Use the same Boost that rosPackages.noetic is built against (rather than
+            # top-level pkgs.boost, a different version) -- otherwise CMAKE_PREFIX_PATH
+            # ends up with two Boost installs and find_package(Boost COMPONENTS python...)
+            # (e.g. kalibr's numpy_eigen) resolves the main config against one version
+            # but can only find the boost_python component built for the other.
+            pkgs.rosPackages.noetic.boost186
             pkgs.jsoncpp
             pkgs.libtins
             pkgs.libzip
+            # kalibr's ethz_apriltag2 demo binary (apriltags_demo.cpp) needs libv4l2.h
+            pkgs.libv4l
+            # kalibr's numpy_eigen needs numpy/arrayobject.h; it's put on CPATH below
+            # since numpy_eigen's own CMakeLists.txt does no numpy detection of its own.
+            pkgs.python3Packages.numpy
+            # Runtime deps of kalibr's Python tools (kalibr_calibrate_cameras and
+            # friends), per kalibr's own Dockerfile_ros1_20_04.
+            pkgs.python3Packages.scipy
+            pkgs.python3Packages.matplotlib
+            pkgs.python3Packages.python-igraph
+            pkgs.python3Packages.pyx
+            pkgs.python3Packages.numdifftools
+            pkgs.python3Packages.pillow
+            pkgs.python3Packages.opencv4
+            pkgs.python3Packages.wxPython_4_2
+            pkgs.python3Packages.tkinter
+            pkgs.python3Packages.pyyaml
+            # kalibr's aslam_optimizer/sparse_block_matrix needs SuiteSparse (+ BLAS/LAPACK).
+            # CMake's FindBLAS/FindLAPACK need a Fortran compiler to verify symbol
+            # mangling, hence gfortran. SuiteSparse links against BLAS/LAPACK internally
+            # but doesn't expose them to downstream find_package(BLAS) calls, so list
+            # them explicitly too.
+            pkgs.suitesparse
+            pkgs.gfortran
+            pkgs.blas
+            pkgs.lapack
             pkgs.spdlog
+            # script/utils.py (used by script/pc_odom_rgb_sync_node.py, which needs
+            # the fruit_counting message package under ws/src/fruit_counting) needs
+            # ros_numpy for PointCloud2<->numpy conversions and h5py for its hdf5
+            # tracklet helpers.
+            pkgs.rosPackages.noetic.ros-numpy
+            pkgs.python3Packages.h5py
             # ... other non-ROS packages
             (
               with pkgs.rosPackages.noetic;
@@ -150,6 +205,9 @@
                 }
             		export QT_QPA_PLATFORM=xcb
             		export DISABLE_ROS1_EOL_WARNINGS=1
+            		# kalibr's numpy_eigen #includes <numpy/arrayobject.h> directly with no
+            		# CMake-side detection of its own.
+            		export CPATH="${pkgs.python3Packages.numpy}/${pkgs.python3.sitePackages}/numpy/_core/include''${CPATH:+:}$CPATH"
             		echo "========================================="
             		echo "🤖 ROS  Development Shell Loaded!"
             		echo "🚀 To run GUI tools, prefix them with: nixGLIntel"
