@@ -1,84 +1,143 @@
+#!/usr/bin/env python3
+"""ROS node that extracts --num_images images, each paired with its
+synchronized /Odometry message and its latest /cloud_registered point cloud,
+starting --offset seconds after the first image is received. Each sample is
+written to its own numbered subdirectory of --output_dir, then the node
+shuts itself down.
 
-import rosbag
-import cv2
-import numpy as np
-from cv_bridge import CvBridge
+/Odometry and /cloud_registered only exist while faster-lio's laserMapping
+is running -- they aren't recorded in dataset/data.bag -- so this must run
+online, alongside mapping_ouster128_with_driver.launch and a bag playback,
+e.g.:
+    roslaunch launch/mapping_ouster128_with_driver.launch
+    rosbag play dataset/data.bag --clock --rate 0.5    # separate terminal
+    python3 script/extract_image.py --output_dir ~/out --offset 30 --num_images 20
+
+Play the bag at --rate 1.0 on a loaded machine and laserMapping's cloud
+registration falls behind real time (its published /cloud_registered stamps
+lag further and further behind /Odometry/image stamps, growing without bound
+as the run goes on), so most/all point clouds end up skipped. --rate 0.5 was
+enough to keep the image/cloud gap bounded (typically ~0.2-0.4s, since
+/cloud_registered publishes at ~10Hz vs ~30Hz for images) on this project's
+dev machine, but how much CPU faster-lio actually gets varies run to run
+with whatever else is running on the machine -- if you're seeing lots of
+"no point cloud" warnings even at --rate 0.5, either lower --rate further or
+raise --pc_max_age; occasional skips are expected and non-fatal."""
+
+import argparse
 import os
-from spinnaker_exposure import gamma_correction
-from spinnaker_exposure import perform_adaptive_histeq
-home = os.path.expanduser("~")
 
-# bag_path_1 = home+"/bags/fruit_counting/synced_pc_odom_img_hands-on-earth-orchard-apples-both-row_2024-07-04-10-15-00_image_processed940_to_990.bag" 
-# bag_path_2 = home+"/bags/fruit_counting/synced_pc_odom_img_hands-on-earth-orchard-apples-both-row_2024-07-04-10-15-00_image_processed1090_to_1140.bag"
+import cv2
+import message_filters
+import numpy as np
+import rospy
+import yaml
+from cv_bridge import CvBridge
+from nav_msgs.msg import Odometry
+from sensor_msgs.msg import Image, PointCloud2
 
-# bag_path_1 = home+"/bags/fruit_counting/synced_pc_odom_img_hands-on-earth-orchard-apples-both-row_2024-07-19-11-22-12_image_processed110_to_170.bag"
-# bag_path_2 = home+"/bags/fruit_counting/synced_pc_odom_img_hands-on-earth-orchard-apples-both-row_2024-07-19-11-22-12_image_processed1380_to_1430.bag"
+from utils import modifyPcMsgFields, pcMsg2NumpyXYZL
 
-# bag_path_1 = home+"/bags/fruit_counting/synced_pc_odom_img_hands-on-earth-orchard_apples_both_rows_2024-05-24-10-45-08_image_processed1090_to_1140.bag"
-# bag_path_2 = home+"/bags/fruit_counting/synced_pc_odom_img_hands-on-earth-orchard_apples_both_rows_2024-05-24-10-45-08_image_processed1200_to_1260.bag"
 
-# bag_path_1 = home+"/bags/fruit_counting/synced_pc_odom_img_hands-on-earth-orchard_apple_row_2024-08-13-12-08-14_image_processed1250_to_1300.bag"
-# bag_path_2 = home+"/bags/fruit_counting/synced_pc_odom_img_hands-on-earth-orchard_apple_row_2024-08-13-12-08-14_image_processed160_to_220.bag"
+def parse_args():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output_dir", required=True,
+                         help="directory to write one numbered subdirectory per extracted image into")
+    parser.add_argument("--offset", type=float, default=0.0,
+                         help="seconds after the first received image to begin extracting from")
+    parser.add_argument("--num_images", type=int, default=10,
+                         help="number of images to extract starting at --offset, then the node exits")
+    parser.add_argument("--image_topic", default="/spinnaker/image_raw")
+    parser.add_argument("--odom_topic", default="/Odometry")
+    parser.add_argument("--pc_topic", default="/cloud_registered")
+    parser.add_argument("--slop", type=float, default=0.02,
+                         help="max seconds between an image and its synchronized odometry message "
+                              "(same tolerance pc_odom_rgb_sync_node.py uses)")
+    parser.add_argument("--pc_max_age", type=float, default=1.0,
+                         help="max seconds between an image and the latest received point cloud "
+                              "for it to still be saved (point clouds are matched to whichever "
+                              "/cloud_registered message most recently arrived, not looked up by "
+                              "nearest timestamp, since this runs online). The healthy gap is "
+                              "usually ~0.2-0.4s (cloud publishes at ~10Hz vs ~30Hz for images) "
+                              "but spikes with momentary system load even at --rate 0.5, hence the "
+                              "margin; if misses are still frequent, lower rosbag play's --rate")
+    return parser.parse_args()
 
-# bag_path_1 = home+"/bags/fruit_counting/synced_pc_odom_img_hands-on-earth-orchard_apple_both_row_2024-06-12-12-08-14_image_processed1260_to_1320.bag"
-# bag_path_2 = home+"/bags/fruit_counting/synced_pc_odom_img_hands-on-earth-orchard_apple_both_row_2024-06-12-12-08-14_image_processed1410_to_1520.bag"
 
-# bag_path_1 = home+"/bags/fruit_counting/synced_pc_odom_img_hands-on-earth-orchard_apple_2024-04-16-12-47-42_image_processed130_to_170.bag"
-# bag_path_2 = home+"/bags/fruit_counting/synced_pc_odom_img_hands-on-earth-orchard_apple_2024-04-16-12-47-42_image_processed950_to_990.bag"
+def odom_to_dict(odom_msg):
+    p = odom_msg.pose.pose.position
+    o = odom_msg.pose.pose.orientation
+    return {
+        "stamp": odom_msg.header.stamp.to_sec(),
+        "frame_id": odom_msg.header.frame_id,
+        "child_frame_id": odom_msg.child_frame_id,
+        "position": {"x": p.x, "y": p.y, "z": p.z},
+        "orientation": {"x": o.x, "y": o.y, "z": o.z, "w": o.w},
+    }
 
-# bag_path_1 = home+"/bags/fruit_counting/synced_pc_odom_img_hands-on-earth-orchard_apple_2024-08-13-12-08-14_image_processed800_to_1300.bag"
-# bag_path_1 = home+"/bags/fruit_counting/synced_pc_odom_img_hands-on-earth-orchard_apple_2024-08-13-12-08-14_image_processed2000_to_2500.bag"
-# bag_path = home+"/bags/fruit_counting/synced_pc_odom_img_hands-on-earth-orchard-apples-both-row_2024-07-19-11-22-12_image_processed1290_to_1400.bag"
-# bag_path = home+"/bags/fruit_counting/synced_pc_odom_img_hands-on-earth-orchard-apples-both-row_2024-07-04-10-15-00_image_processed_image_processed1090_to_1290.bag"
-# bag_path = home+"/bags/fruit_counting/synced_pc_odom_img_hands-on-earth-orchard_apple_both_row_2024-06-12-12-08-14_image_processed1420_to_1790.bag"
-bag_path = home+"/bags/fruit_counting/synced_pc_odom_img_hands-on-earth-orchard_apples_both_rows_2024-05-24-10-45-08_image_processed1200_to_1400.bag"
 
-Bayered = False
+class ImageExtractor:
+    def __init__(self, args):
+        self.args = args
+        self.bridge = CvBridge()
+        self.start_stamp = None
+        self.count = 0
+        self.last_pc_msg = None
 
-# image_folder_name = bag_path.split("/")[-1].split(".")[0].split("_")[-5]
-# image_folder_path = home+"/bags/fruit_counting/image_labelling_data/"+image_folder_name+"_apple/any_labeling"
-# image_folder_path = home+"/bags/aug-13th-row1-sun-side"
-# image_folder_path = home+"/bags/july-19th-row1-sun-side"
-# image_folder_path = home+"/bags/july-4th-row1-sun-side"
-# image_folder_path = home+"/bags/june-12th-row1-sun-side"
-image_folder_path = home+"/bags/may-24th-row1-sun-side"
-print("image_folder_path: ", image_folder_path)
-if not os.path.exists(image_folder_path):
-    os.makedirs(image_folder_path)
-i = 0
-bridge = CvBridge()
-with rosbag.Bag(bag_path, 'r') as bag:
-    message_count = bag.get_message_count()
-    for topic, msg, t in bag.read_messages():
-        i += 1
-        print("\n")
-        print("Processing message: ", i, "/", message_count)
-        image_msg = msg.img
-        if Bayered:
-            image_msg = bridge.imgmsg_to_cv2(image_msg)
-            image = cv2.cvtColor(image_msg, cv2.COLOR_BayerBG2BGR)
-        else:   
-        # save the image to a folder
-            image = bridge.imgmsg_to_cv2(image_msg, "bgr8")
-        # rotate the image counter-clockwise 90 degree
+        os.makedirs(args.output_dir, exist_ok=True)
+
+        rospy.Subscriber(args.pc_topic, PointCloud2, self.pc_cb, queue_size=1)
+
+        odom_sub = message_filters.Subscriber(args.odom_topic, Odometry)
+        img_sub = message_filters.Subscriber(args.image_topic, Image)
+        self.sync = message_filters.ApproximateTimeSynchronizer(
+            [odom_sub, img_sub], queue_size=50, slop=args.slop)
+        self.sync.registerCallback(self.sync_cb)
+
+    def pc_cb(self, msg):
+        self.last_pc_msg = msg
+
+    def sync_cb(self, odom_msg, img_msg):
+        t = img_msg.header.stamp.to_sec()
+        if self.start_stamp is None:
+            self.start_stamp = t
+            rospy.loginfo("first image received at t=%.3f, waiting %.1fs before extracting",
+                          t, self.args.offset)
+        if t - self.start_stamp < self.args.offset:
+            return
+
+        image = self.bridge.imgmsg_to_cv2(img_msg, "bgr8")
         image = np.rot90(image)
-        # save the image
-        cv2.imwrite(image_folder_path+"/apples_"+str(i)+".png", image)
 
-# with rosbag.Bag(bag_path_2, 'r') as bag:
-#     message_count = bag.get_message_count() + message_count
-#     for topic, msg, t in bag.read_messages():
-#         i += 1
-#         print("\n")
-#         print("Processing message: ", i, "/", message_count)
-#         image_msg = msg.img
-#         if Bayered:
-#             image_msg = bridge.imgmsg_to_cv2(image_msg)
-#             image = cv2.cvtColor(image_msg, cv2.COLOR_BayerBG2BGR)
-#         # save the image to a folder
-#         else:
-#             image = bridge.imgmsg_to_cv2(image_msg, "bgr8")
-#         # rotate the image counter-clockwise 90 degree
-#         image = np.rot90(image)
-#         # save the image
-#         cv2.imwrite(image_folder_path+"/apples_"+str(i)+".png", image)
+        sample_dir = os.path.join(self.args.output_dir, f"{self.count:06d}")
+        os.makedirs(sample_dir, exist_ok=True)
+        cv2.imwrite(os.path.join(sample_dir, "image.png"), image)
+        with open(os.path.join(sample_dir, "odom.yaml"), "w") as f:
+            yaml.safe_dump(odom_to_dict(odom_msg), f)
+
+        pc_msg = self.last_pc_msg
+        if pc_msg is not None and abs(pc_msg.header.stamp.to_sec() - t) <= self.args.pc_max_age:
+            # world-frame xyz + intensity, same layout pc_odom_rgb_sync_node.py works with
+            pc_xyzl = pcMsg2NumpyXYZL(modifyPcMsgFields(pc_msg))
+            np.save(os.path.join(sample_dir, "pointcloud.npy"), pc_xyzl)
+        else:
+            rospy.logwarn("no point cloud within %.2fs of image %d (t=%.3f); skipping pointcloud.npy",
+                          self.args.pc_max_age, self.count, t)
+
+        self.count += 1
+        rospy.loginfo("[%d/%d] saved %s", self.count, self.args.num_images, sample_dir)
+
+        if self.count >= self.args.num_images:
+            rospy.loginfo("extracted %d images, shutting down", self.count)
+            rospy.signal_shutdown("done")
+
+
+def main():
+    args = parse_args()
+    rospy.init_node("extract_image_node", anonymous=True)
+    ImageExtractor(args)
+    rospy.spin()
+
+
+if __name__ == "__main__":
+    main()

@@ -18,13 +18,17 @@
     <!-- launch driver to get pointcloud from ouster -->
     <include file="$(find ouster_ros)/launch/replay.launch">
         <arg name="ouster_ns" value="ouster" />
-        <arg name="metadata" value="$(dirname)/../../../../metadata/ouster_metadata.json" />
+        <arg name="metadata" value="$(dirname)/../metadata/ouster_metadata.json" />
         <arg name="timestamp_mode" value="TIME_FROM_ROS_TIME" />
         <arg name="viz" value="false" />
     </include>
 
-    <!-- publish tf from lidar to camera -->
-    <node pkg="tf2_ros" type="static_transform_publisher" name="lidar2camera" args="0.11506135 -0.04801469 -0.08219188 0.7063663 -0.0005764 0.707846 -0.0005755 body camera"/>
+    <!-- publish tf from lidar body frame to the Spinnaker camera. Child frame is
+         named "spinnaker" to match the frame_id actually recorded on
+         /spinnaker/image_raw and /spinnaker/camera_info (not "camera"), so
+         downstream consumers (e.g. rviz's Camera display) can resolve it via tf
+         without extra remapping. -->
+    <node pkg="tf2_ros" type="static_transform_publisher" name="lidar2camera" args="0.11506135 -0.04801469 -0.08219188 0.7063663 -0.0005764 0.707846 -0.0005755 body spinnaker"/>
 
     <!-- rviz -->
     <group if="$(arg rviz)">

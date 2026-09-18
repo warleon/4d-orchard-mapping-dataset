@@ -1,0 +1,78 @@
+<launch>
+<!-- LiDAR-camera fusion.
+
+     Pipeline (all pieces already existed except camera_info_publisher.py,
+     which is just format glue, not new calibration or projection math):
+       - ouster driver decodes the recorded lidar packets
+       - faster-lio turns those into odometry (/Odometry, tf camera_init->body)
+         and an accumulated world-frame cloud (/cloud_registered)
+       - the body->spinnaker static transform (already-calibrated extrinsic,
+         see mapping_ouster128_with_driver.launch) completes the tf chain
+         camera_init -> body -> spinnaker
+       - camera_info_publisher.py fills in /spinnaker/camera_info (the
+         recorded topic is all-zero) from a kalibr intrinsics yaml
+       - colorize_pc_node.py uses utils.debugPc2depthImg to project
+         cloud_registered into the camera image and pick up each point's
+         color, republishing an XYZRGB cloud on /colorized_cloud that rviz
+         shows as a real colored point cloud (viewable from any angle, not
+         just the camera's own viewpoint). rviz's own Camera display (kept in
+         the config, just disabled by default) can still be toggled on for
+         the live overlay instead -->
+
+  <arg name="data_bag" default="$(dirname)/../dataset/data.bag"
+       doc="bag with /ouster/lidar_packets, /ouster/imu_packets, /spinnaker/image_raw"/>
+  <arg name="calib_file" default="$(dirname)/../dataset/hands-on-earth-orchard-calib-2024-07-19-11-20-16.yaml"
+       doc="kalibr cam0 intrinsics yaml for the Spinnaker camera (pick whichever
+       of dataset/*.yaml matches your session; these predate data.bag's
+       capture date, so re-running kalibr_calibrate_cameras against
+       calibration.bag for a same-day calibration is worth considering)"/>
+  <arg name="rate" default="1.0" doc="bag playback rate"/>
+  <arg name="play_delay" default="5"
+       doc="seconds to wait before playing the bag, so the ouster decoder
+       nodelet (which itself starts a few seconds after roslaunch) is up
+       before packets start arriving"/>
+  <arg name="rviz" default="true"/>
+  <arg name="colorize_rate" default="2.0"
+       doc="max Hz for colorize_pc_node's projection work (debayering the
+       full-res image + transforming/projecting the registered cloud is
+       expensive; running it on every scan competes with faster-lio's
+       real-time thread for CPU and visibly degrades its own trajectory)"/>
+
+  <include file="$(dirname)/mapping_ouster128_with_driver.launch">
+    <arg name="rviz" value="false"/>
+  </include>
+
+  <param name="use_sim_time" value="true"/>
+  <node pkg="rosbag" type="play" name="data_bag_player" output="screen" required="true"
+        launch-prefix="bash -c 'sleep $(arg play_delay); $0 $@' "
+        args="--clock $(arg data_bag) --rate $(arg rate)">
+    <!-- the recorded camera_info is all zeros; move it aside so
+         camera_info_publisher.py can own the real topic name -->
+    <remap from="/spinnaker/camera_info" to="/spinnaker/camera_info_raw"/>
+  </node>
+
+  <node pkg="fruit_counting" type="camera_info_publisher.py" name="spinnaker_camera_info_publisher"
+        output="screen">
+    <param name="calib_file" value="$(arg calib_file)"/>
+    <remap from="image" to="/spinnaker/image_raw"/>
+    <remap from="camera_info" to="/spinnaker/camera_info"/>
+  </node>
+
+  <node pkg="fruit_counting" type="colorize_pc_node.py" name="colorize_pc_node"
+        output="screen" launch-prefix="nice -n 10">
+    <param name="world_frame" value="camera_init"/>
+    <param name="camera_frame" value="spinnaker"/>
+    <param name="max_rate" value="$(arg colorize_rate)"/>
+    <remap from="cloud" to="/cloud_registered"/>
+    <remap from="image" to="/spinnaker/image_raw"/>
+    <remap from="camera_info" to="/spinnaker/camera_info"/>
+  </node>
+
+  <group if="$(arg rviz)">
+    <!-- nixGLIntel: without it rviz segfaults on GLX FBConfig lookup in this
+         devShell (see the shell's own startup banner) -->
+    <node launch-prefix="nixGLIntel nice" pkg="rviz" type="rviz" name="rviz"
+          args="-d $(dirname)/../config/rviz/lidar_camera_fusion.rviz"/>
+  </group>
+
+</launch>

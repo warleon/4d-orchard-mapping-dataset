@@ -142,6 +142,19 @@
             pkgs.python3Packages.wxPython_4_2
             pkgs.python3Packages.tkinter
             pkgs.python3Packages.pyyaml
+            # jupyter-all is nixpkgs' merged python3.withPackages-style jupyter
+            # environment (jupyterlab + notebook + ipykernel with a unified
+            # sys.prefix, so share/jupyter/lab/schemas resolves correctly --
+            # listing jupyter/notebook/ipykernel individually alongside it
+            # instead leaves their own standalone `bin/jupyter` wrapper first
+            # on PATH, whose sys.prefix is the bare python3 interpreter with
+            # no merged schemas dir, causing "Missing or misshapen translation
+            # settings schema" 404s). rospy is built against pkgs.python3
+            # (3.12) too, and PYTHONPATH (set by the ROS buildEnv's setup hook
+            # below) is inherited by jupyter's kernel subprocess regardless of
+            # which python3 derivation it's running under, so `import rospy`
+            # still works in notebooks.
+            pkgs.jupyter-all
             # kalibr's aslam_optimizer/sparse_block_matrix needs SuiteSparse (+ BLAS/LAPACK).
             # CMake's FindBLAS/FindLAPACK need a Fortran compiler to verify symbol
             # mangling, hence gfortran. SuiteSparse links against BLAS/LAPACK internally
