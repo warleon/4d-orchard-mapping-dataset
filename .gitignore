@@ -6,3 +6,4 @@ logs/
 kalibr
 *.bag
 __pycache__
+extracted/
