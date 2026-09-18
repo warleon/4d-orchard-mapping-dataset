@@ -1,3 +1,13 @@
+# MY CHANGES
+
+## to extract_image
+```
+nixGLIntel roslaunch ~/Projects/macanudo/study-repos/4d-orchard-mapping-dataset/launch/mapping_ouster128_with_driver.launch
+rosbag play dataset/data.bag --clock          # separate terminal
+python3 script/extract_image.py --output_dir ~/out --offset 30 --num_images 20
+```
+
+
 # 4d-orchard-mapping-dataset
 
 This repository holds scripts and tutorials on using the dataset presented in the paper **4D Metric-Semantic Mapping for Persistent Orchard Monitoring: Method and Dataset**
