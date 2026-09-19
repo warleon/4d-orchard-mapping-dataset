@@ -1,10 +1,11 @@
 # MY CHANGES
 
 ## to extract_image
+run in separate terminals
 ```
-nixGLIntel roslaunch ~/Projects/macanudo/study-repos/4d-orchard-mapping-dataset/launch/mapping_ouster128_with_driver.launch
-rosbag play dataset/data.bag --clock          # separate terminal
-python3 script/extract_image.py --output_dir ~/out --offset 30 --num_images 20
+nixGLIntel roslaunch /home/warleon/Projects/macanudo/study-repos/4d-orchard-mapping-dataset/launch/mapping_ouster128_with_driver.launch
+python3 script/extract_image.py --output_dir ./dataset/extracted --offset 45 --num_images 5
+rosbag play dataset/data.bag --clock --rate 0.2
 ```
 
 

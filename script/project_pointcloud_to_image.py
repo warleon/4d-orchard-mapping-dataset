@@ -53,7 +53,7 @@ class Projector:
     def loadPointCloud(self, pointCloudPath):
         self.pointCloud = np.load(pointCloudPath)
         self.pointCloud[:,3] = 1
-        print("pointCloud\n",self.pointCloud[:8])
+        #print("pointCloud\n",self.pointCloud[:8])
 
     def loadOdometry(self, odometryPath):
         with open(odometryPath) as file:
@@ -72,7 +72,7 @@ class Projector:
             [0,0,1]
         ])
     
-        print("intrinsicsMatrix\n",result)
+        #print("intrinsicsMatrix\n",result)
 
         return result
 
@@ -81,29 +81,31 @@ class Projector:
         bottom = np.array([0,0,0,1]).reshape(1,4)
         result =  np.concatenate((top,bottom))
         result = np.linalg.inv(result)
-        print("extrinsicsMatrix\n",result)
+        #print("extrinsicsMatrix\n",result)
         return result
 
     def displayTransform(self):
-        return np.array([
+        result =  np.array([
         [1,0,self.imageWidth/2],
         [0,-1,self.imageHeight/2],
         [0,0,1],
         ])
 
+        return np.linalg.inv(result)
+
     def projectedPointCloud(self):
         inCameraCoordinates =  self.pointCloud @ self.extrinsicsMatrix().T
-        print("inCameraCoordinates", inCameraCoordinates.shape,"\n",inCameraCoordinates[:10])
+        #print("inCameraCoordinates", inCameraCoordinates.shape,"\n",inCameraCoordinates[:10])
         mask = inCameraCoordinates[:,2]>0
         valid = inCameraCoordinates[mask][:,:3]
-        print("with positive z", valid.shape,"\n",valid[:10])
+        #print("with positive z", valid.shape,"\n",valid[:10])
         valid = valid @ self.intrinsicsMatrix().T
-        print("in image coordinates", valid.shape,"\n",valid[:10])
+        #print("in image coordinates", valid.shape,"\n",valid[:10])
         valid = (valid  @ self.displayTransform().T)
-        print("in display coordinates", valid.shape,"\n",valid[:10])
+        #print("in display coordinates", valid.shape,"\n",valid[:10])
         mask = (valid[:,0]>0)&(valid[:,0]<self.imageWidth)&(valid[:,1]>0)&(valid[:,1]<self.imageHeight)
         valid =valid[mask][:,:2]
-        print("inside display bounds", valid.shape,"\n",valid[:10])
+        #print("inside display bounds", valid.shape,"\n",valid[:10])
         return valid
 
 

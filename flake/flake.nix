@@ -73,6 +73,50 @@
             ];
           };
         };
+        # Named so its wrapped bin/ (each binary carries its own
+        # ROS_PACKAGE_PATH via makeWrapper) can be forced to the front of
+        # PATH in shellHook -- otherwise the unwrapped bin/ dirs that ride
+        # in transitively from these same ROS packages' propagated build
+        # inputs land earlier on PATH, and running e.g. `roscore` picks
+        # that unwrapped copy, which has no ROS_PACKAGE_PATH set and fails
+        # with "Resource not found: roslaunch".
+        rosEnv =
+          with pkgs.rosPackages.noetic;
+          buildEnv {
+            #underlay = true;
+            paths = [
+              ros-core
+              roslaunch
+              rosbag
+              rostopic
+              rviz
+              sensor-msgs
+              geometry-msgs
+              image-view
+              rospy
+              robot-localization
+              imu-filter-madgwick
+              # ROS deps of ws/src/faster-lio and ws/src/ouster-ros, built from
+              # source via `catkin build` in ws/ (see README.md)
+              catkin
+              roscpp
+              std-msgs
+              nav-msgs
+              tf
+              tf2-ros
+              tf2-eigen
+              pcl-ros
+              pcl-conversions
+              cv-bridge
+              nodelet
+              message-generation
+              message-runtime
+              eigen-conversions
+              std-srvs
+              topic-tools
+              # ... other ROS packages
+            ];
+          };
       in
       {
         devShells.default = pkgs.mkShell {
@@ -172,43 +216,7 @@
             pkgs.rosPackages.noetic.ros-numpy
             pkgs.python3Packages.h5py
             # ... other non-ROS packages
-            (
-              with pkgs.rosPackages.noetic;
-              buildEnv {
-                #underlay = true;
-                paths = [
-                  ros-core
-                  rosbag
-                  rostopic
-                  rviz
-                  sensor-msgs
-                  geometry-msgs
-                  image-view
-                  rospy
-                  robot-localization
-                  imu-filter-madgwick
-                  # ROS deps of ws/src/faster-lio and ws/src/ouster-ros, built from
-                  # source via `catkin build` in ws/ (see README.md)
-                  catkin
-                  roscpp
-                  std-msgs
-                  nav-msgs
-                  tf
-                  tf2-ros
-                  tf2-eigen
-                  pcl-ros
-                  pcl-conversions
-                  cv-bridge
-                  nodelet
-                  message-generation
-                  message-runtime
-                  eigen-conversions
-                  std-srvs
-                  topic-tools
-                  # ... other ROS packages
-                ];
-              }
-            )
+            rosEnv
           ];
           shellHook = ''
                 # Creates .venv via uv if it doesn't exist yet, then activates it.
@@ -216,6 +224,11 @@
                   [ -d .venv ] || uv venv
                   source .venv/bin/activate
                 }
+                # rosEnv's own ROS packages (rospy, tf, ...) drag their unwrapped
+                # bin/ dirs onto PATH ahead of rosEnv/bin via propagated build
+                # inputs, so force rosEnv/bin (whose binaries are wrapped with a
+                # working ROS_PACKAGE_PATH) back to the front.
+                export PATH="${rosEnv}/bin:$PATH"
             		export QT_QPA_PLATFORM=xcb
             		export DISABLE_ROS1_EOL_WARNINGS=1
             		# kalibr's numpy_eigen #includes <numpy/arrayobject.h> directly with no
