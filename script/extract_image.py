@@ -41,26 +41,45 @@ from utils import modifyPcMsgFields, pcMsg2NumpyXYZL
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output_dir", required=True,
-                         help="directory to write one numbered subdirectory per extracted image into")
-    parser.add_argument("--offset", type=float, default=0.0,
-                         help="seconds after the first received image to begin extracting from")
-    parser.add_argument("--num_images", type=int, default=10,
-                         help="number of images to extract starting at --offset, then the node exits")
+    parser.add_argument(
+        "--output_dir",
+        required=True,
+        help="directory to write one numbered subdirectory per extracted image into",
+    )
+    parser.add_argument(
+        "--offset",
+        type=float,
+        default=0.0,
+        help="seconds after the first received image to begin extracting from",
+    )
+    parser.add_argument(
+        "--num_images",
+        type=int,
+        default=10,
+        help="number of images to extract starting at --offset, then the node exits",
+    )
     parser.add_argument("--image_topic", default="/spinnaker/image_raw")
     parser.add_argument("--odom_topic", default="/Odometry")
     parser.add_argument("--pc_topic", default="/cloud_registered")
-    parser.add_argument("--slop", type=float, default=0.02,
-                         help="max seconds between an image and its synchronized odometry message "
-                              "(same tolerance pc_odom_rgb_sync_node.py uses)")
-    parser.add_argument("--pc_max_age", type=float, default=1.0,
-                         help="max seconds between an image and the latest received point cloud "
-                              "for it to still be saved (point clouds are matched to whichever "
-                              "/cloud_registered message most recently arrived, not looked up by "
-                              "nearest timestamp, since this runs online). The healthy gap is "
-                              "usually ~0.2-0.4s (cloud publishes at ~10Hz vs ~30Hz for images) "
-                              "but spikes with momentary system load even at --rate 0.5, hence the "
-                              "margin; if misses are still frequent, lower rosbag play's --rate")
+    parser.add_argument(
+        "--slop",
+        type=float,
+        default=0.02,
+        help="max seconds between an image and its synchronized odometry message "
+        "(same tolerance pc_odom_rgb_sync_node.py uses)",
+    )
+    parser.add_argument(
+        "--pc_max_age",
+        type=float,
+        default=1.0,
+        help="max seconds between an image and the latest received point cloud "
+        "for it to still be saved (point clouds are matched to whichever "
+        "/cloud_registered message most recently arrived, not looked up by "
+        "nearest timestamp, since this runs online). The healthy gap is "
+        "usually ~0.2-0.4s (cloud publishes at ~10Hz vs ~30Hz for images) "
+        "but spikes with momentary system load even at --rate 0.5, hence the "
+        "margin; if misses are still frequent, lower rosbag play's --rate",
+    )
     return parser.parse_args()
 
 
@@ -91,7 +110,8 @@ class ImageExtractor:
         odom_sub = message_filters.Subscriber(args.odom_topic, Odometry)
         img_sub = message_filters.Subscriber(args.image_topic, Image)
         self.sync = message_filters.ApproximateTimeSynchronizer(
-            [odom_sub, img_sub], queue_size=50, slop=args.slop)
+            [odom_sub, img_sub], queue_size=50, slop=args.slop
+        )
         self.sync.registerCallback(self.sync_cb)
 
     def pc_cb(self, msg):
@@ -101,8 +121,11 @@ class ImageExtractor:
         t = img_msg.header.stamp.to_sec()
         if self.start_stamp is None:
             self.start_stamp = t
-            rospy.loginfo("first image received at t=%.3f, waiting %.1fs before extracting",
-                          t, self.args.offset)
+            rospy.loginfo(
+                "first image received at t=%.3f, waiting %.1fs before extracting",
+                t,
+                self.args.offset,
+            )
         if t - self.start_stamp < self.args.offset:
             return
 
@@ -116,13 +139,20 @@ class ImageExtractor:
             yaml.safe_dump(odom_to_dict(odom_msg), f)
 
         pc_msg = self.last_pc_msg
-        if pc_msg is not None and abs(pc_msg.header.stamp.to_sec() - t) <= self.args.pc_max_age:
+        if (
+            pc_msg is not None
+            and abs(pc_msg.header.stamp.to_sec() - t) <= self.args.pc_max_age
+        ):
             # world-frame xyz + intensity, same layout pc_odom_rgb_sync_node.py works with
             pc_xyzl = pcMsg2NumpyXYZL(modifyPcMsgFields(pc_msg))
             np.save(os.path.join(sample_dir, "pointcloud.npy"), pc_xyzl)
         else:
-            rospy.logwarn("no point cloud within %.2fs of image %d (t=%.3f); skipping pointcloud.npy",
-                          self.args.pc_max_age, self.count, t)
+            rospy.logwarn(
+                "no point cloud within %.2fs of image %d (t=%.3f); skipping pointcloud.npy",
+                self.args.pc_max_age,
+                self.count,
+                t,
+            )
 
         self.count += 1
         rospy.loginfo("[%d/%d] saved %s", self.count, self.args.num_images, sample_dir)

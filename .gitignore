@@ -7,3 +7,4 @@ kalibr
 *.bag
 __pycache__
 extracted/
+pyrightconfig.json

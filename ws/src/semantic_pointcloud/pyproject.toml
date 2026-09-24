@@ -1,0 +1,21 @@
+[project]
+name = "semantic-pointcloud"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "torch==2.4.1",
+    "pytorch3d",
+    "torchvision>=0.19.1",
+    "ultralytics>=8.4.159",
+]
+
+[tool.uv.sources]
+pytorch3d = { git = "https://github.com/facebookresearch/pytorch3d.git", rev = "stable" }
+
+[tool.uv]
+no-build-isolation-package = ["pytorch3d"]
+
+[tool.pyright]
+extraPaths = ["src"]
+venvPath = "."
+venv = ".venv"
