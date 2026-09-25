@@ -1,8 +1,10 @@
 from dataclasses import dataclass
 
+from utils.base_config import BaseConfig
+
 
 @dataclass
-class ProjectorConfig:
+class ProjectorConfig(BaseConfig):
     calibration_path: str
     half_window: float = 1.5
     world_frame: str = "camera_init"

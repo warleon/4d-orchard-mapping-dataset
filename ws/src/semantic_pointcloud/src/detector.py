@@ -8,10 +8,10 @@ from utils.detector_config import DetectorConfig
 class Detector:
     def __init__(self, config: DetectorConfig) -> None:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = YOLO(config.model_path)
+        self.model = YOLO(config.yolo_model_path)
         self.model.to(self.device)
-        self.confidence = config.confidence
-        self.classes = config.classes
+        self.confidence = config.yolo_confidence
+        self.classes = config.yolo_classes
         # class index -> class name, as reported by the loaded model
         self.classNames = self.model.names
 

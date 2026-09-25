@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-from dataclasses import fields
 import os
 import sys
 import time
@@ -20,18 +19,11 @@ from utils.projector_config import ProjectorConfig
 
 
 def buildProjectorConfig() -> ProjectorConfig:
-    config = ProjectorConfig(calibration_path=rospy.get_param("~calibration_path"))
+    return ProjectorConfig.load()
 
 
-def buildDetector() -> Detector | None:
-    modelPath = rospy.get_param("~yolo_model_path")
-    return Detector(
-        DetectorConfig(
-            model_path=modelPath,
-            confidence=rospy.get_param("~yolo_confidence", 0.25),
-            classes=rospy.get_param("~yolo_classes", None),
-        )
-    )
+def buildDetector() -> Detector:
+    return Detector(DetectorConfig.load())
 
 
 def main():
