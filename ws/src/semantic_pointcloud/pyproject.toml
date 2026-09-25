@@ -7,6 +7,8 @@ dependencies = [
     "pytorch3d",
     "torchvision>=0.19.1",
     "ultralytics>=8.4.159",
+    "sortedcontainers>=2.4.0",
+    "sortedcontainers-stubs>=2.4.3",
 ]
 
 [tool.uv.sources]

@@ -9,27 +9,19 @@
          see mapping_ouster128_with_driver.launch) completes the tf chain
          camera_init -> body -> spinnaker
        - semantic_pointcloud_node.py (ws/src/semantic_pointcloud) synchronizes
-         /Odometry, /spinnaker/image_raw and the accumulated /cloud_registered,
-         splats the cloud into the camera's own view with PyTorch3D, and shows
-         the composited frame live in its own window. This is the same
-         lidar->image projection colorize_pc_node.py does (see
-         lidar_camera_fusion.launch), viewed directly from the camera's own
-         viewpoint instead of republished as a colored cloud for rviz - so,
-         unlike that pipeline, no camera_info_publisher.py is needed here:
-         the node reads the kalibr yaml itself.
-         PyTorch3D has no binned point rasterizer on CPU (CUDA-only), so
-         without a GPU this stays well under real-time - see render_scale/
-         max_points below to trade quality for speed.
-       - optionally (yolo_model_path), a YOLO model also runs on each raw
-         camera frame: its boxes are drawn as outlines on the final image,
-         points whose projected pixel falls inside a box render blue instead
-         of the default color, and are tagged with that box's class id.
-         Every such tagged point seen across the session is periodically
-         (export_interval) re-exported to detected_pointcloud_path as a
-         class-colored, voxel-deduped PLY - and once more on shutdown -
-         so a crash or an interrupted Ctrl+C loses at most one interval's
-         worth; max_duration lets a run stop and export cleanly on its own
-         instead. -->
+         /Odometry, /spinnaker/image_raw and the accumulated /cloud_registered
+         and publishes: the rotated camera image (image_topic), and - if
+         yolo_model_path is set - each YOLO box extruded into a 3D cuboid
+         (centered at its own detected points' median depth, sized to match
+         there, as thick as its largest side) drawn as boxes_topic markers,
+         and only the points landing inside one of those cuboids as an
+         XYZRGB cloud (point_cloud_topic, colored by class id). rviz displays
+         all three live - see config/rviz/semantic_pointcloud.rviz.
+         Every tagged point seen across the session is also periodically
+         (export_interval) exported to detected_pointcloud_path as a
+         class-colored, voxel-deduped PLY - and once more on shutdown - so a
+         crash or an interrupted Ctrl+C loses at most one interval's worth;
+         max_duration lets a run stop and export cleanly on its own instead. -->
 
   <arg name="data_bag" default="$(dirname)/../dataset/data.bag"
        doc="bag with /ouster/lidar_packets, /ouster/imu_packets, /spinnaker/image_raw"/>
@@ -45,45 +37,31 @@
        doc="seconds to wait before playing the bag, so the ouster decoder
        nodelet (which itself starts a few seconds after roslaunch) is up
        before packets start arriving"/>
-  <arg name="rviz" default="false"
-       doc="also show faster-lio's own rviz config (raw cloud/trajectory);
-       off by default since semantic_pointcloud_node already opens its own
-       live view of the projected frame"/>
-  <arg name="render_scale" default="0.08"
-       doc="render canvas size as a fraction of the calibration's native
-       resolution; NDC intrinsics are resolution independent so this only
-       trades render speed for output sharpness, not accuracy. CPU point
-       rasterization cost is render_scale^2 * max_points (no CUDA binning),
-       so raise this well above the CPU-safe default if running on a GPU"/>
-  <arg name="max_points" default="5000"
-       doc="/cloud_registered points are randomly subsampled to at most this
-       many before rendering each frame; raise substantially on a GPU"/>
-  <arg name="point_cloud_queue_size" default="5"
-       doc="number of recent /cloud_registered scans accumulated before each
-       render (faster-lio publishes the current re-registered scan, not the
-       full map, so this controls how much local history gets shown)"/>
-  <arg name="max_point_cloud_age" default="1.0"
-       doc="drop accumulated scans older than this many seconds relative to
-       the frame being rendered; guards against stale, no-longer-aligned
-       points (e.g. floating in the sky) when rendering falls behind the
-       scan rate, since point_cloud_queue_size alone only bounds by count"/>
+  <arg name="faster_lio_rviz" default="false"
+       doc="also show faster-lio's own rviz config (raw cloud/trajectory)"/>
+  <arg name="rviz" default="true"
+       doc="show config/rviz/semantic_pointcloud.rviz (odometry, image, filtered
+       point cloud, detection boxes)"/>
+  <arg name="half_window" default="1.5"
+       doc="seconds of /cloud_registered accumulated on each side of the
+       synced odometry/image pair's timestamp before it is published - the
+       pair waits for both the past and future half before firing"/>
   <arg name="display_rotation" default="1"
        doc="number of 90-degree counter-clockwise turns applied to the
-       already-composited output for display, since the Spinnaker camera is
-       mounted rotated; try 3 (or 2) if the default comes out the wrong way"/>
+       published image, since the Spinnaker camera is mounted rotated; try
+       3 (or 2) if the default comes out the wrong way"/>
   <arg name="yolo_model_path" default=""
        doc="path to a YOLO .pt checkpoint (see models/ at the repo root);
-       leave empty to disable detection - points then always render in
-       point_color. When set, points whose projected pixel falls inside a
-       detected box render in inside_box_color instead"/>
-  <arg name="yolo_confidence" default="0.75" doc="YOLO detection confidence threshold"/>
-  <arg name="box_color" default="[0, 255, 0]" doc="RGB (0-255) outline color for drawn YOLO boxes"/>
-  <arg name="box_line_width" default="1" doc="outline thickness (pixels) for drawn YOLO boxes"/>
+       leave empty to disable detection - the filtered point cloud and boxes
+       topics then stay empty"/>
+  <arg name="yolo_confidence" default="0.25" doc="YOLO detection confidence threshold"/>
+  <arg name="image_topic" default="/semantic_pointcloud/image"/>
+  <arg name="point_cloud_topic" default="/semantic_pointcloud/points"/>
+  <arg name="boxes_topic" default="/semantic_pointcloud/boxes"/>
   <arg name="detected_pointcloud_path" default="/tmp/semantic_pointcloud_detections.ply"
        doc="on shutdown (if yolo_model_path is set), every point ever seen
        inside a detection box across the session is written here as a PLY,
-       colored by class id - not the live-preview cloud, so it isn't limited
-       by max_points"/>
+       colored by class id"/>
   <arg name="export_voxel_size" default="0.02"
        doc="voxel grid size (meters) used to dedupe the exported PLY - the
        same physical point/object seen as detected across many frames would
@@ -96,14 +74,18 @@
        process dies instead of shutting down cleanly. 0 disables, exporting
        only once at shutdown"/>
   <arg name="max_duration" default="0.0"
-       doc="stop and shut down cleanly after this many seconds (0 = run
-       until the bag ends or killed); prefer this over Ctrl+C when possible
-       - interrupting a live render/export can occasionally abort the
-       process instead of exiting cleanly (a PyTorch worker thread mid-op
-       not always tolerating a forced signal-driven unwind)"/>
+       doc="stop and shut down cleanly after this many seconds of BAG time
+       (0 = run until the bag ends or killed) - real elapsed time is
+       max_duration/rate, since it tracks the bag's own clock. Prefer this
+       over Ctrl+C when possible: interrupting a live export can occasionally
+       abort the process instead of exiting cleanly (a PyTorch worker thread
+       mid-op not always tolerating a forced signal-driven unwind). The
+       first frame can't publish before roughly 2*half_window seconds of bag
+       time have played, plus play_delay real seconds up front - set
+       max_duration well above 2*half_window, or leave at 0"/>
 
   <include file="$(dirname)/mapping_ouster128_with_driver.launch">
-    <arg name="rviz" value="$(arg rviz)"/>
+    <arg name="rviz" value="$(arg faster_lio_rviz)"/>
   </include>
 
   <param name="use_sim_time" value="true"/>
@@ -114,19 +96,24 @@
   <node pkg="semantic_pointcloud" type="semantic_pointcloud_node.py"
         name="semantic_pointcloud_node" output="screen" launch-prefix="nice -n 10">
     <param name="calibration_path" value="$(arg calib_file)"/>
-    <param name="render_scale" value="$(arg render_scale)"/>
-    <param name="max_points" value="$(arg max_points)"/>
-    <param name="point_cloud_queue_size" value="$(arg point_cloud_queue_size)"/>
-    <param name="max_point_cloud_age" value="$(arg max_point_cloud_age)"/>
+    <param name="half_window" value="$(arg half_window)"/>
     <param name="display_rotation" value="$(arg display_rotation)"/>
     <param name="yolo_model_path" value="$(arg yolo_model_path)"/>
     <param name="yolo_confidence" value="$(arg yolo_confidence)"/>
-    <rosparam param="box_color" subst_value="true">$(arg box_color)</rosparam>
-    <param name="box_line_width" value="$(arg box_line_width)"/>
+    <param name="image_topic" value="$(arg image_topic)"/>
+    <param name="point_cloud_topic" value="$(arg point_cloud_topic)"/>
+    <param name="boxes_topic" value="$(arg boxes_topic)"/>
     <param name="detected_pointcloud_path" value="$(arg detected_pointcloud_path)"/>
     <param name="export_voxel_size" value="$(arg export_voxel_size)"/>
     <param name="export_interval" value="$(arg export_interval)"/>
     <param name="max_duration" value="$(arg max_duration)"/>
   </node>
+
+  <group if="$(arg rviz)">
+    <!-- nixGLIntel: without it rviz segfaults on GLX FBConfig lookup in this
+         devShell, same as lidar_camera_fusion.launch's own rviz node -->
+    <node launch-prefix="nixGLIntel nice" pkg="rviz" type="rviz" name="semantic_pointcloud_rviz"
+          args="-d $(dirname)/../config/rviz/semantic_pointcloud.rviz"/>
+  </group>
 
 </launch>
