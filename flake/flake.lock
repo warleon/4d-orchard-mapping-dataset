@@ -113,15 +113,14 @@
         ]
       },
       "locked": {
-        "lastModified": 1788367137,
-        "narHash": "sha256-Ile8rarIgbXpbE3HBnEIbaLMC35wAWPmP+NvJ3eov3Y=",
-        "path": "/home/warleon/.dotfiles/dev/python",
+        "path": "./nix/python",
         "type": "path"
       },
       "original": {
-        "path": "/home/warleon/.dotfiles/dev/python",
+        "path": "./nix/python",
         "type": "path"
-      }
+      },
+      "parent": []
     },
     "root": {
       "inputs": {
