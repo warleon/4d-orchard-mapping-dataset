@@ -6,7 +6,7 @@
     nix-ros-overlay.url = "github:lopsided98/nix-ros-overlay/ros1-25.05";
     nixpkgs.follows = "nix-ros-overlay/nixpkgs"; # IMPORTANT!!!
     nixgl.url = "github:nix-community/nixGL";
-    pythonDev.url = "path:/home/warleon/.dotfiles/dev/python";
+    pythonDev.url = "path:./nix/python";
     pythonDev.inputs.nixpkgs.follows = "nixpkgs";
   };
   outputs =

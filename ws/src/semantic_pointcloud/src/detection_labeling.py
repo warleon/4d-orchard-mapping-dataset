@@ -15,7 +15,9 @@ class Box3D(NamedTuple):
 
 
 class DetectionLabeler:
-    def __init__(self, detector: Detector, camera: Camera, device: torch.device) -> None:
+    def __init__(
+        self, detector: Detector, camera: Camera, device: torch.device
+    ) -> None:
         self.detector = detector
         self.camera = camera
         self.device = device
@@ -27,7 +29,7 @@ class DetectionLabeler:
         every box, else the class id of whichever 3D box it fell inside.
         """
         boxes = self.detector.detect(image)
-        rospy.loginfo_throttle(2.0, "DetectionLabeler: %d detection(s) this frame", boxes.shape[0])
+        rospy.loginfo("DetectionLabeler: %d detection(s) this frame", boxes.shape[0])
         classIds = torch.full((points.shape[0],), -1.0, device=self.device)
         boxes3D: list[Box3D] = []
         if not boxes.numel():
@@ -68,13 +70,19 @@ class DetectionLabeler:
         # as thick as its largest side.
         x1, y1, x2, y2, _conf, cls = box
         referenceDepth = candidateDepths.median()
-        width, height = self.camera.pixelSizeToWorldSize(x2 - x1, y2 - y1, referenceDepth)
+        width, height = self.camera.pixelSizeToWorldSize(
+            x2 - x1, y2 - y1, referenceDepth
+        )
         thickness = torch.maximum(width, height)
-        center = self.camera.pixelToCameraSpace((x1 + x2) / 2, (y1 + y2) / 2, referenceDepth)
+        center = self.camera.pixelToCameraSpace(
+            (x1 + x2) / 2, (y1 + y2) / 2, referenceDepth
+        )
         extents = torch.stack([width, height, thickness])
         return Box3D(center=center, extents=extents, classId=float(cls))
 
-    def pointsInBox3D(self, box: Box3D, cameraSpacePoints: torch.Tensor) -> torch.Tensor:
+    def pointsInBox3D(
+        self, box: Box3D, cameraSpacePoints: torch.Tensor
+    ) -> torch.Tensor:
         offset = (cameraSpacePoints - box.center).abs()
         half = box.extents / 2.0
         return (offset <= half).all(dim=1)
