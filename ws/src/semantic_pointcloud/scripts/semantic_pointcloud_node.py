@@ -2,6 +2,8 @@
 import os
 import sys
 import time
+from typing import assert_type
+
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _venv_bootstrap import activate
@@ -23,7 +25,8 @@ def buildProjectorConfig() -> ProjectorConfig:
 
 
 def buildDetector() -> Detector:
-    return Detector(DetectorConfig.load())
+
+    return Detector(DetectorConfig.load(), "cpu")
 
 
 def main():
@@ -46,31 +49,19 @@ def main():
     while not rospy.is_shutdown() and rospy.get_time() == 0.0:
         time.sleep(0.05)
     startBagTime = rospy.get_time()
-    lastExportTime = time.time()
 
     rate = rospy.Rate(rospy.get_param("~poll_rate", 10))
     while not rospy.is_shutdown():
-        if maxDuration > 0 and rospy.get_time() - startBagTime >= maxDuration:
+        if maxDuration > 0.0 and (rospy.get_time() - startBagTime) >= maxDuration:
             rospy.loginfo(
                 "semantic_pointcloud_node: max_duration elapsed, shutting down"
             )
             break
 
-        if (
-            projector.exporter is not None
-            and exportInterval > 0
-            and time.time() - lastExportTime >= exportInterval
-        ):
-            projector.exporter.export(detectedPointcloudPath)
-            lastExportTime = time.time()
-
         try:
             rate.sleep()
         except rospy.ROSInterruptException:
             break
-
-    if projector.exporter is not None:
-        projector.exporter.export(detectedPointcloudPath)
 
 
 if __name__ == "__main__":

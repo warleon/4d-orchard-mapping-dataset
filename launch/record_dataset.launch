@@ -1,0 +1,67 @@
+<launch>
+<!-- faster-lio + recorder_node, replayed from a recorded bag.
+
+     Pipeline:
+       - ouster driver decodes the recorded lidar packets
+       - faster-lio turns those into odometry (/Odometry, tf camera_init->body)
+         and an accumulated world-frame cloud (/cloud_registered)
+       - the body->spinnaker static transform (already-calibrated extrinsic,
+         see mapping_ouster128_with_driver.launch) completes the tf chain
+         camera_init -> body -> spinnaker
+       - recorder_node.py (ws/src/semantic_pointcloud) synchronizes /Odometry,
+         /spinnaker/image_raw and the accumulated /cloud_registered the same
+         way semantic_pointcloud_node.py does, but instead of running
+         detection it just writes each synced (odometry, image, point cloud)
+         triple to its own folder under output_dir, named by that sample's
+         own timestamp (odometry.yaml, image.png, point_cloud.npy).
+         record_offset/record_duration let a slice of the bag's own timeline
+         be captured instead of the whole thing - the listener itself starts
+         buffering immediately regardless, so the first recorded sample's
+         window is already warm once record_offset is reached. -->
+
+  <arg name="data_bag" default="$(dirname)/../dataset/data.bag"
+       doc="bag with /ouster/lidar_packets, /ouster/imu_packets, /spinnaker/image_raw"/>
+  <arg name="rate" default="1.0" doc="bag playback rate"/>
+  <arg name="start_offset" default="0.0" doc="seconds into the bag to start
+       playback from (rosbag play --start) - not to be confused with
+       record_offset below, which is relative to wherever playback starts"/>
+  <arg name="play_delay" default="5"
+       doc="seconds to wait before playing the bag, so the ouster decoder
+       nodelet (which itself starts a few seconds after roslaunch) is up
+       before packets start arriving"/>
+  <arg name="half_window" default="1.5"
+       doc="seconds of /cloud_registered accumulated on each side of the
+       synced odometry/image pair's timestamp before it is published - the
+       pair waits for both the past and future half before firing"/>
+  <arg name="output_dir" default="$(dirname)/../dataset/recorded"
+       doc="root directory each synced sample is written under, one
+       subfolder per sample named by its own timestamp"/>
+  <arg name="record_offset" default="0.0"
+       doc="seconds into the bag's own timeline (i.e. after start_offset) to
+       wait before the recorder starts writing samples"/>
+  <arg name="record_duration" default="0.0"
+       doc="seconds after record_offset to keep recording before the node
+       stops and shuts down cleanly (0 = keep recording until the bag ends
+       or the node is killed). The first sample can't be written before
+       roughly 2*half_window seconds of bag time have played past
+       record_offset, plus play_delay real seconds up front - set
+       record_duration well above 2*half_window, or leave at 0"/>
+
+  <include file="$(dirname)/mapping_ouster128_with_driver.launch">
+    <arg name="rviz" value="false"/>
+  </include>
+
+  <param name="use_sim_time" value="true"/>
+  <node pkg="rosbag" type="play" name="data_bag_player" output="screen" required="true"
+        launch-prefix="bash -c 'sleep $(arg play_delay); $0 $@' "
+        args="--clock $(arg data_bag) --rate $(arg rate) --start $(arg start_offset)"/>
+
+  <node pkg="semantic_pointcloud" type="recorder_node.py"
+        name="recorder_node" output="screen" launch-prefix="nice -n 10">
+    <param name="listener/half_window" value="$(arg half_window)"/>
+    <param name="output_dir" value="$(arg output_dir)"/>
+    <param name="offset" value="$(arg record_offset)"/>
+    <param name="duration" value="$(arg record_duration)"/>
+  </node>
+
+</launch>

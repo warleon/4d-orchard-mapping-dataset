@@ -6,18 +6,59 @@ import torch
 import yaml
 from nav_msgs.msg import Odometry
 from pytorch3d.renderer.fisheyecameras import FishEyeCameras
-from pytorch3d.transforms import quaternion_to_matrix
+from pytorch3d.transforms import matrix_to_quaternion, quaternion_to_matrix
 
 from utils.camera_config import CameraConfig
 
 
-def loadFisheyeCamera(calibrationPath: str, device: torch.device):
+def rotateCalibration(
+    width: float,
+    height: float,
+    fx: float,
+    fy: float,
+    u0: float,
+    v0: float,
+    p1: float,
+    p2: float,
+    quarterTurns: int,
+) -> tuple[float, float, float, float, float, float, float, float]:
+    """Rotates a pinhole/fisheye calibration to match a quarterTurns 90-
+    degree CCW rotation of the image itself (np.rot90/torch.rot90
+    convention). Applying this once here - instead of rotating pixel
+    coordinates or images at various points downstream - lets every image
+    handed to this Camera be expected pre-rotated the same way, with
+    toPixels/pixelToCameraSpace/etc. then needing no rotation awareness at
+    all; they just see a camera natively mounted in that orientation.
+
+    k1,k2 (radial distortion) are rotation-invariant (they're a function of
+    r^2 = x^2+y^2 alone) and don't need adjusting. p1,p2 (tangential) and
+    the principal point/focal/resolution do; derived by rotating the
+    Brown-Conrady tangential-distortion terms and the pixel-index mapping
+    np.rot90 itself applies, one 90-degree step at a time.
+    """
+    for _ in range(quarterTurns % 4):
+        u0, v0 = v0, width - u0
+        width, height = height, width
+        fx, fy = fy, fx
+        p1, p2 = -p2, p1
+    return width, height, fx, fy, u0, v0, p1, p2
+
+
+def loadFisheyeCamera(calibrationPath: str, device: torch.device, quarterTurns: int = 0):
     with open(calibrationPath) as file:
         calibrationData = cast(dict, yaml.safe_load(file))
     calibration = CameraConfig(**calibrationData["cam0"])
     fx, fy, u0, v0 = calibration.intrinsics
-    width, height = calibration.resolution  # kalibr's own convention
+    # despite the [width, height] convention kalibr documents, this
+    # dataset's calibration files list [height, width] - confirmed against
+    # the recorded images themselves (2448w x 2048h) and against the
+    # intrinsics' own principal point (u0~=1252 is half of 2448, not 2048)
+    height, width = calibration.resolution
     k1, k2, p1, p2 = calibration.distortion_coeffs
+
+    width, height, fx, fy, u0, v0, p1, p2 = rotateCalibration(
+        width, height, fx, fy, u0, v0, p1, p2, quarterTurns
+    )
 
     # FishEyeCameras.in_ndc() is hard-coded True, so its raw pixel-space
     # intrinsics must be pre-converted to NDC here; the negation matches the
@@ -52,15 +93,24 @@ class Camera:
         worldFrame: str,
         cameraFrame: str,
         device: torch.device,
+        quarterTurns: int = 0,
     ) -> None:
         self.device = device
         self.worldFrame = worldFrame
         self.cameraFrame = cameraFrame
-        self.tfBuffer = tf2_ros.Buffer()
+        # default cache is 10s; CPU-bound YOLO inference can push the
+        # effective processing lag (on top of the half_window buffering)
+        # past that, so lookups for the buffered odometry stamp start
+        # missing the tf history.
+        self.tfBuffer = tf2_ros.Buffer(rospy.Duration(60))
         self.tfListener = tf2_ros.TransformListener(self.tfBuffer)
 
+        # every image this Camera is ever handed is expected pre-rotated by
+        # quarterTurns (see rotateCalibration) - the caller rotates once,
+        # up front, and this Camera's own notion of pixel space already
+        # matches that, so nothing downstream rotates again
         self.fisheye, self.height, self.width, self.scale = loadFisheyeCamera(
-            calibrationPath, device
+            calibrationPath, device, quarterTurns
         )
 
     def updatePose(self, odometry: Odometry) -> bool:
@@ -73,11 +123,7 @@ class Camera:
                 self.cameraFrame,
                 odometry.header.stamp,
             )
-        except (
-            tf2_ros.LookupException,
-            tf2_ros.ExtrapolationException,
-            tf2_ros.ConnectivityException,
-        ) as error:
+        except Exception as error:
             rospy.logerr_throttle(
                 5.0,
                 "Camera: tf lookup %s->%s failed: %s",
@@ -110,18 +156,25 @@ class Camera:
             R=self.fisheye.R, T=self.fisheye.T
         ).transform_points(points)
 
-    def toPixels(self, points: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """Returns (pixels, inFront).
+    def toWorldSpace(self, points: torch.Tensor) -> torch.Tensor:
+        return (
+            self.fisheye.get_world_to_view_transform(R=self.fisheye.R, T=self.fisheye.T)
+            .inverse()
+            .transform_points(points)
+        )
 
-        inFront must be applied by the caller: the fisheye x/z, y/z formula
-        doesn't check the sign of z, so a point behind the camera can still
-        land on a plausible pixel.
-        """
-        inFront = self.toCameraSpace(points)[:, 2] > 0
+    def currentOrientation(self) -> torch.Tensor:
+        """Camera's current world-space orientation as a ROS-ordered
+        (x, y, z, w) quaternion, for anchoring a camera-local direction to a
+        world-frame marker."""
+        w, x, y, z = matrix_to_quaternion(self.fisheye.R[0])
+        return torch.stack([x, y, z, w])
+
+    def toPixels(self, points: torch.Tensor):
         ndc = self.fisheye.transform_points(points)[..., :2]
         pixelsX = self.width / 2.0 - ndc[:, 0] * self.scale
         pixelsY = self.height / 2.0 - ndc[:, 1] * self.scale
-        return torch.stack([pixelsX, pixelsY], dim=-1), inFront
+        return torch.stack([pixelsX, pixelsY], dim=-1)
 
     def pixelSizeToWorldSize(
         self, pixelWidth: torch.Tensor, pixelHeight: torch.Tensor, depth: torch.Tensor

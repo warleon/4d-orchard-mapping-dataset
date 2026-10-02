@@ -54,10 +54,20 @@
        doc="path to a YOLO .pt checkpoint (see models/ at the repo root);
        leave empty to disable detection - the filtered point cloud and boxes
        topics then stay empty"/>
-  <arg name="yolo_confidence" default="0.25" doc="YOLO detection confidence threshold"/>
+  <arg name="yolo_confidence" default="0.75" doc="YOLO detection confidence threshold"/>
+  <arg name="cluster_gap_threshold" default="0.15"
+       doc="max depth gap (meters) within a single real-world cluster of a
+       detection's candidate points - a mask's candidates often span a near
+       cluster (the actual detected object) plus a far one (background
+       canopy/trunk behind it); anything wider than this is treated as a
+       seam between two clusters, and the box is placed at the near one's
+       mean depth"/>
   <arg name="image_topic" default="/semantic_pointcloud/image"/>
   <arg name="point_cloud_topic" default="/semantic_pointcloud/points"/>
   <arg name="boxes_topic" default="/semantic_pointcloud/boxes"/>
+  <arg name="mask_topic" default="/semantic_pointcloud/mask"
+       doc="each detection's YOLO mask painted in its instance color (same
+       palette as point_cloud_topic/boxes_topic), black elsewhere"/>
   <arg name="detected_pointcloud_path" default="/tmp/semantic_pointcloud_detections.ply"
        doc="on shutdown (if yolo_model_path is set), every point ever seen
        inside a detection box across the session is written here as a PLY,
@@ -100,9 +110,11 @@
     <param name="display_rotation" value="$(arg display_rotation)"/>
     <param name="yolo_model_path" value="$(arg yolo_model_path)"/>
     <param name="yolo_confidence" value="$(arg yolo_confidence)"/>
+    <param name="detection_labeler/cluster_gap_threshold" value="$(arg cluster_gap_threshold)"/>
     <param name="image_topic" value="$(arg image_topic)"/>
     <param name="point_cloud_topic" value="$(arg point_cloud_topic)"/>
     <param name="boxes_topic" value="$(arg boxes_topic)"/>
+    <param name="mask_topic" value="$(arg mask_topic)"/>
     <param name="detected_pointcloud_path" value="$(arg detected_pointcloud_path)"/>
     <param name="export_voxel_size" value="$(arg export_voxel_size)"/>
     <param name="export_interval" value="$(arg export_interval)"/>

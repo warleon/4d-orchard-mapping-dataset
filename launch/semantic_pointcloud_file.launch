@@ -1,0 +1,98 @@
+<launch>
+<!-- semantic_pointcloud, replayed from a dataset written by record_dataset.launch
+     instead of a live bag - no ouster driver or faster-lio involved, since
+     every sample's odometry/image/point cloud already sits on disk.
+
+     Pipeline:
+       - semantic_pointcloud_file_node.py (ws/src/semantic_pointcloud) reads
+         each sample folder under dataset_dir in timestamp order (same
+         format Recorder wrote: odometry.yaml, image.png, point_cloud.npy),
+         re-broadcasting each sample's recorded odometry over tf
+         (camera_init -> body) in place of faster-lio's live broadcast
+       - the body->spinnaker static transform below (the same calibrated
+         extrinsic mapping_ouster128_with_driver.launch publishes) completes
+         the tf chain camera_init -> body -> spinnaker
+       - from there it's identical to semantic_pointcloud.launch: each YOLO
+         box extruded into a 3D cuboid (centered at its own detected points'
+         median depth, sized to match there, as thick as its largest side)
+         is published as boxes_topic markers, and only the points landing
+         inside one of those cuboids as an XYZRGB cloud (point_cloud_topic,
+         colored by instance id). rviz displays all three live - see
+         config/rviz/semantic_pointcloud.rviz. -->
+
+  <arg name="dataset_dir" doc="root directory written by record_dataset.launch's
+       output_dir - one subfolder per sample, named by its own timestamp"/>
+  <arg name="calib_file" default="$(dirname)/../dataset/hands-on-earth-orchard-calib-2024-07-19-11-20-16.yaml"
+       doc="kalibr cam0 intrinsics yaml for the Spinnaker camera (pick whichever
+       of dataset/*.yaml matches your session)"/>
+  <arg name="playback_rate" default="1.0" doc="speed multiplier applied to the
+       gaps between consecutive samples' own timestamps; &lt;= 0 replays as fast
+       as possible"/>
+  <arg name="start_delay" default="5.0" doc="seconds to wait before replay
+       starts, so rviz (including its own tf2 buffer) has time to connect
+       first - with no live bag padding this out, a short recorded dataset
+       can otherwise finish playing before a just-started rviz has
+       subscribed to anything"/>
+  <arg name="rviz" default="true"
+       doc="show config/rviz/semantic_pointcloud.rviz (odometry, image, filtered
+       point cloud, detection boxes)"/>
+  <arg name="display_rotation" default="1"
+       doc="number of 90-degree counter-clockwise turns applied to the
+       published image, since the Spinnaker camera is mounted rotated; try
+       3 (or 2) if the default comes out the wrong way"/>
+  <arg name="yolo_model_path" default=""
+       doc="path to a YOLO .pt checkpoint (see models/ at the repo root);
+       leave empty to disable detection - the filtered point cloud and boxes
+       topics then stay empty"/>
+  <arg name="yolo_confidence" default="0.75" doc="YOLO detection confidence threshold"/>
+  <arg name="cluster_gap_threshold" default="0.15"
+       doc="max depth gap (meters) within a single real-world cluster of a
+       detection's candidate points - a mask's candidates often span a near
+       cluster (the actual detected object) plus a far one (background
+       canopy/trunk behind it); anything wider than this is treated as a
+       seam between two clusters, and the box is placed at the near one's
+       mean depth"/>
+  <arg name="image_topic" default="/semantic_pointcloud/image"/>
+  <arg name="point_cloud_topic" default="/semantic_pointcloud/points"/>
+  <arg name="boxes_topic" default="/semantic_pointcloud/boxes"/>
+  <arg name="mask_topic" default="/semantic_pointcloud/mask"
+       doc="each detection's YOLO mask painted in its instance color (same
+       palette as point_cloud_topic/boxes_topic), black elsewhere"/>
+
+  <!-- there's no /clock source in this launch (no rosbag play) - force this
+       off explicitly, since /use_sim_time is a global param server value
+       that otherwise lingers true from a prior semantic_pointcloud.launch or
+       record_dataset.launch run against the same roscore, which would hang
+       every rospy.sleep() forever waiting for a /clock that never comes -->
+  <param name="use_sim_time" value="false"/>
+
+  <!-- same calibrated body->spinnaker extrinsic as
+       mapping_ouster128_with_driver.launch, without the ouster driver or
+       faster-lio it's normally bundled with -->
+  <node pkg="tf2_ros" type="static_transform_publisher" name="lidar2camera"
+        args="0.11506135 -0.04801469 -0.08219188 0.7063663 -0.0005764 0.707846 -0.0005755 body spinnaker"/>
+
+  <node pkg="semantic_pointcloud" type="semantic_pointcloud_file_node.py"
+        name="semantic_pointcloud_file_node" output="screen" launch-prefix="nice -n 10">
+    <param name="dataset_dir" value="$(arg dataset_dir)"/>
+    <param name="rate" value="$(arg playback_rate)"/>
+    <param name="start_delay" value="$(arg start_delay)"/>
+    <param name="calibration_path" value="$(arg calib_file)"/>
+    <param name="display_rotation" value="$(arg display_rotation)"/>
+    <param name="yolo_model_path" value="$(arg yolo_model_path)"/>
+    <param name="yolo_confidence" value="$(arg yolo_confidence)"/>
+    <param name="detection_labeler/cluster_gap_threshold" value="$(arg cluster_gap_threshold)"/>
+    <param name="image_topic" value="$(arg image_topic)"/>
+    <param name="point_cloud_topic" value="$(arg point_cloud_topic)"/>
+    <param name="boxes_topic" value="$(arg boxes_topic)"/>
+    <param name="mask_topic" value="$(arg mask_topic)"/>
+  </node>
+
+  <group if="$(arg rviz)">
+    <!-- nixGLIntel: without it rviz segfaults on GLX FBConfig lookup in this
+         devShell, same as semantic_pointcloud.launch's own rviz node -->
+    <node launch-prefix="nixGLIntel nice" pkg="rviz" type="rviz" name="semantic_pointcloud_rviz"
+          args="-d $(dirname)/../config/rviz/semantic_pointcloud.rviz"/>
+  </group>
+
+</launch>

@@ -1,6 +1,7 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from utils.base_config import BaseConfig
+from utils.detection_labeler_config import DetectionLabelerConfig
 
 
 @dataclass
@@ -14,3 +15,7 @@ class ProjectorConfig(BaseConfig):
     image_topic: str = "/semantic_pointcloud/image"
     point_cloud_topic: str = "/semantic_pointcloud/points"
     boxes_topic: str = "/semantic_pointcloud/boxes"
+    mask_topic: str = "/semantic_pointcloud/mask"
+    detection_labeler: DetectionLabelerConfig = field(
+        default_factory=DetectionLabelerConfig
+    )
