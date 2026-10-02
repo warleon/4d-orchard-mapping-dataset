@@ -49,6 +49,14 @@ class DetectionLabeler:
         rospy.loginfo(
             "DetectionLabeler: %d detection(s) this frame", masks.data.shape[0]
         )
+        rospy.loginfo_throttle(
+            5.0,
+            "DetectionLabeler: image=%s masks=%s camera=%dx%d",
+            tuple(image.shape),
+            tuple(masks.data.shape),
+            self.camera.width,
+            self.camera.height,
+        )
         instanceIds = torch.full((points.shape[0],), -1.0, device=self.device)
         depths, inBounds, maskPixelX, maskPixelY = self.projectToMaskSpace(
             points, masks
@@ -62,12 +70,24 @@ class DetectionLabeler:
             if not mask.any():
                 continue
 
+            rospy.loginfo(
+                "DetectionLabeler: raw box=%s mask nonzero=%d/%d",
+                boxes.data[i, :4].tolist(),
+                int(mask.sum()),
+                mask.numel(),
+            )
+
             maskHits = self.hitTestMask(mask, maskPixelX, maskPixelY, inBounds)
             if not maskHits.any():
                 continue
 
             calibBox = self.rescaleBoxToCalibration(
                 boxes.data[i], masks.data.shape[1:]
+            )
+            rospy.loginfo(
+                "DetectionLabeler: calibBox=%s (image CHW was %s)",
+                calibBox[:4].tolist(),
+                tuple(image.shape),
             )
             box3D = self.extrudeToBox3D(calibBox, depths[maskHits], self.nextInstanceId)
             self.nextInstanceId += 1
