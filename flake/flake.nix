@@ -143,6 +143,26 @@
             pkgs.colcon
             pkgs.git
             pkgs.nixgl.nixGLIntel
+            # catkin's cmake/platform/lsb.cmake shells out to lsb_release -si/-sd/-sr/-sc
+            # at configure time. On a foreign (non-NixOS) Linux host, the system's
+            # /usr/bin/lsb_release is itself a Python script (#!/usr/bin/python3)
+            # whose process inherits this shell's LD_LIBRARY_PATH (set above for Intel
+            # XPU/ROS libs) - making the *system* python3 dynamically load this flake's
+            # Nix-built libexpat, which requires a newer glibc than the host provides
+            # ("GLIBC_2.36/2.38 not found"), crashing lsb_release and failing the
+            # `catkin build` configure step for every package. Shadow it with a trivial
+            # stub ahead of /usr/bin on PATH instead of trying to sandbox LD_LIBRARY_PATH
+            # around one subprocess - catkin only reads lsb_release's output to set a
+            # distro-name CMake variable nothing in this repo's packages depends on.
+            (pkgs.writeShellScriptBin "lsb_release" ''
+              case "$1" in
+                -si) echo "Ubuntu" ;;
+                -sd) echo "Ubuntu 22.04" ;;
+                -sr) echo "22.04" ;;
+                -sc) echo "jammy" ;;
+                *) echo "Ubuntu" ;;
+              esac
+            '')
             # catkin build tool for ws/ (per README) -- provides `catkin build`,
             # `catkin config`, etc. Distinct from the `catkin` ROS package below,
             # which supplies the CMake macros consumed by each package's CMakeLists.txt.
