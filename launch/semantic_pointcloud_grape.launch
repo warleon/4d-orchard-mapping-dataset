@@ -9,9 +9,12 @@
      Differences from semantic_pointcloud.launch:
        - includes mapping_ouster_grape.launch (no ouster_ros driver/replay, no
          metadata json - the bag's lidar points are already decoded)
-       - decompresses /front/zed_node/rgb/image_rect_color via image_transport
-         republish, since semantic_pointcloud_node only ever consumes raw
-         sensor_msgs/Image, never CompressedImage
+       - decompresses /front/zed_node/rgb/image_rect_color via a small cv_bridge
+         python node (zed_decompress_node.py), since semantic_pointcloud_node only
+         ever consumes raw sensor_msgs/Image, never CompressedImage - not the
+         standard image_transport republish node, because this environment's
+         compressed_image_transport build doesn't register its pluginlib plugin
+         (pluginlib only sees image_transport/raw_sub, never .../compressed_sub)
        - remaps that decompressed topic onto /spinnaker/image_raw (the topic name
          hardcoded in ws/src/semantic_pointcloud/src/utils/listener_config.py -
          roslaunch <remap> works regardless of it being a Python literal)
@@ -68,8 +71,10 @@
   <node pkg="tf2_ros" type="static_transform_publisher" name="lidar2camera"
         args="0 0 0 0 0 0 1 body zed_front_camera"/>
 
-  <node pkg="image_transport" type="republish" name="zed_front_decompress"
-        args="compressed in:=/front/zed_node/rgb/image_rect_color raw out:=/front/zed_node/rgb/image_rect_color_raw"/>
+  <node pkg="semantic_pointcloud" type="zed_decompress_node.py" name="zed_front_decompress">
+    <remap from="~in" to="/front/zed_node/rgb/image_rect_color/compressed"/>
+    <remap from="~out" to="/front/zed_node/rgb/image_rect_color_raw"/>
+  </node>
 
   <param name="use_sim_time" value="true"/>
   <node pkg="rosbag" type="play" name="data_bag_player" output="screen" required="true"

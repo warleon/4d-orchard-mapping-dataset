@@ -114,13 +114,6 @@
               eigen-conversions
               std-srvs
               topic-tools
-              # image_transport's compressed plugin (pluginlib-loaded at runtime, so
-              # it must be on the ROS package path even though nothing links against
-              # it directly) - needed by `rosrun image_transport republish compressed
-              # in:=... raw out:=...` to decompress CompressedImage topics (e.g. the
-              # grape rig's ZED feed - see launch/semantic_pointcloud_grape.launch)
-              image-transport
-              compressed-image-transport
               # ... other ROS packages
             ];
           };

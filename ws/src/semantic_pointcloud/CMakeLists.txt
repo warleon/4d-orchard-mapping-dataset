@@ -164,6 +164,7 @@ catkin_install_python(PROGRAMS
   scripts/semantic_pointcloud_node.py
   scripts/recorder_node.py
   scripts/semantic_pointcloud_file_node.py
+  scripts/zed_decompress_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
