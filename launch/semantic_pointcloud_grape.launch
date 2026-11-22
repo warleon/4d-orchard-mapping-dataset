@@ -49,6 +49,16 @@
   <arg name="yolo_model_path" default="$(dirname)/../models/yolo_grape_berries_best_200.pt"
        doc="path to a YOLO .pt checkpoint; leave empty to disable detection"/>
   <arg name="yolo_confidence" default="0.75" doc="YOLO detection confidence threshold"/>
+  <arg name="tile_size" default="320"
+       doc="grape berries are too small for a single pass over the ~1920x1080
+       ZED frame to recognize once downscaled to the model's stride - run a
+       full tile_size x tile_size sliding-window grid over the frame instead,
+       each tile at native pixel density, merged back via NMS (see
+       detector.py). Unlike semantic_pointcloud.launch (apple), which never
+       sets this param and so keeps DetectorConfig's tile_size=None default
+       (one pass, whole frame), this launch always tiles"/>
+  <arg name="tile_overlap" default="0.1"
+       doc="fraction of tile_size overlapped between neighboring tiles"/>
   <arg name="cluster_gap_threshold" default="0.15"
        doc="max depth gap (meters) within a single real-world cluster of a
        detection's candidate points"/>
@@ -90,6 +100,8 @@
     <param name="display_rotation" value="$(arg display_rotation)"/>
     <param name="yolo_model_path" value="$(arg yolo_model_path)"/>
     <param name="yolo_confidence" value="$(arg yolo_confidence)"/>
+    <param name="tile_size" value="$(arg tile_size)"/>
+    <param name="tile_overlap" value="$(arg tile_overlap)"/>
     <param name="detection_labeler/cluster_gap_threshold" value="$(arg cluster_gap_threshold)"/>
     <param name="image_topic" value="$(arg image_topic)"/>
     <param name="point_cloud_topic" value="$(arg point_cloud_topic)"/>

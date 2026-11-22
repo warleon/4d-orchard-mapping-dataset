@@ -14,6 +14,7 @@ package_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(package_root, "src"))
 
 import rospy
+import torch
 from detector import Detector
 from projector import Projector
 from utils.detector_config import DetectorConfig
@@ -25,8 +26,12 @@ def buildProjectorConfig() -> ProjectorConfig:
 
 
 def buildDetector() -> Detector:
-
-    return Detector(DetectorConfig.load(), "cpu")
+    # Projector picks cuda/cpu the same way (see projector.py) - the detector
+    # was left hardcoded to "cpu" here regardless, which tiled inference
+    # (several dozen YOLO passes per frame instead of one) makes far costlier
+    # to get wrong on a GPU box.
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    return Detector(DetectorConfig.load(), device)
 
 
 def main():
