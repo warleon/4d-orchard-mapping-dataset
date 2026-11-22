@@ -96,11 +96,15 @@
     <param name="max_duration" value="$(arg max_duration)"/>
   </node>
 
+  <arg name="rviz_launch_prefix" default="nice"
+       doc="nixGLIntel (used by semantic_pointcloud.launch's rviz node) wraps
+       binaries to use an Intel GPU's real libGL instead of Nix's generic one
+       - wrong vendor on an NVIDIA box like anthony-gpu, and unnecessary when
+       viewing rviz over ssh -X anyway, since X11-forwarded GLX renders
+       indirectly through the client's own X server/GPU, not this host's"/>
+
   <group if="$(arg rviz)">
-    <!-- nixGLIntel: only needed on an Intel-GPU Nix devShell like the local
-         machine's; on a dedicated GPU box like anthony-gpu this prefix is
-         likely unnecessary or wrong - check `which nixGLIntel` first. -->
-    <node launch-prefix="nixGLIntel nice" pkg="rviz" type="rviz" name="semantic_pointcloud_rviz"
+    <node launch-prefix="$(arg rviz_launch_prefix)" pkg="rviz" type="rviz" name="semantic_pointcloud_rviz"
           args="-d $(dirname)/../config/rviz/semantic_pointcloud.rviz"/>
   </group>
 
