@@ -1,0 +1,44 @@
+<launch>
+<!-- Local-only loop for tuning body->zed_front_camera (see
+     semantic_pointcloud_grape.launch) without needing anything from the
+     remote GPU box: replays a short recorded snippet (dataset/grape_zed_tuning_snippet.bag
+     - /tf, /cloud_registered, the ZED's compressed image + camera_info, from
+     a window of the grape bag with berries actually in view) on loop, decompresses
+     the image the same way the live pipeline does, and runs an interactive
+     rviz marker for the extrinsic instead of a fixed static transform. No
+     faster-lio, no YOLO, no rosbag play of the full 50GB bag - just enough
+     to judge point/image alignment by eye.
+
+     Workflow: in rviz, drag/rotate the interactive marker (an arrow at
+     zed_front_camera's current guess pose, attached to body) until the
+     Camera Overlay display's projected Raw Cloud lands on real geometry
+     (canopy/trunks/grape bunches) - the tf updates live as you drag, no
+     relaunching. Right-click the marker -> Save to append the current 7
+     numbers to /tmp/extrinsic_tuner_output.txt; copy the last line's
+     numbers into semantic_pointcloud_grape.launch's own lidar2camera
+     static transform. -->
+
+  <arg name="bag" default="$(dirname)/../dataset/grape_zed_tuning_snippet.bag"/>
+
+  <param name="use_sim_time" value="true"/>
+  <node pkg="rosbag" type="play" name="snippet_player" output="screen"
+        args="--clock --loop $(arg bag)"/>
+
+  <node pkg="semantic_pointcloud" type="zed_decompress_node.py" name="zed_front_decompress">
+    <remap from="~in" to="/front/zed_node/rgb/image_rect_color/compressed"/>
+    <remap from="~out" to="/front/zed_node/rgb/image_rect_color_raw"/>
+  </node>
+
+  <!-- same starting point as semantic_pointcloud_grape.launch's lidar2camera -
+       drag/rotate in rviz instead of editing these directly. -->
+  <node pkg="semantic_pointcloud" type="extrinsic_tuner_node.py" name="extrinsic_tuner">
+    <param name="body_frame" value="body"/>
+    <param name="child_frame" value="zed_front_camera"/>
+    <rosparam param="initial_translation">[0.0, 0.0, 0.0]</rosparam>
+    <rosparam param="initial_rotation">[0.5, -0.5, 0.5, -0.5]</rosparam>
+  </node>
+
+  <node launch-prefix="nixGLIntel nice" pkg="rviz" type="rviz" name="rviz"
+        args="-d $(dirname)/../config/rviz/extrinsic_tuning.rviz"/>
+
+</launch>
