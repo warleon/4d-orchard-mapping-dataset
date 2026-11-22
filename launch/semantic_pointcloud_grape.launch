@@ -119,12 +119,17 @@
     <param name="max_duration" value="$(arg max_duration)"/>
   </node>
 
-  <arg name="rviz_launch_prefix" default="nice"
+  <arg name="rviz_launch_prefix" default="env LIBGL_ALWAYS_SOFTWARE=1 nice"
        doc="nixGLIntel (used by semantic_pointcloud.launch's rviz node) wraps
        binaries to use an Intel GPU's real libGL instead of Nix's generic one
        - wrong vendor on an NVIDIA box like anthony-gpu, and unnecessary when
        viewing rviz over ssh -X anyway, since X11-forwarded GLX renders
-       indirectly through the client's own X server/GPU, not this host's"/>
+       indirectly through the client's own X server/GPU, not this host's.
+       LIBGL_ALWAYS_SOFTWARE=1 forces Mesa's software rasterizer instead:
+       indirect GLX over ssh -X segfaulted rviz outright (confirmed on a
+       Wayland/XWayland client) without it - presumably XWayland's
+       indirect-GLX support being limited/absent, a known rough edge, not
+       anything specific to this host"/>
 
   <group if="$(arg rviz)">
     <node launch-prefix="$(arg rviz_launch_prefix)" pkg="rviz" type="rviz" name="semantic_pointcloud_rviz"
