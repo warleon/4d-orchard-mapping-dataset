@@ -19,14 +19,23 @@
      static transform. -->
 
   <arg name="bag" default="$(dirname)/../dataset/grape_zed_tuning_snippet.bag"/>
+  <arg name="rviz" default="true"/>
 
   <param name="use_sim_time" value="true"/>
   <node pkg="rosbag" type="play" name="snippet_player" output="screen"
         args="--clock --loop $(arg bag)"/>
 
+  <!-- the recorded image/camera_info still carry the ZED driver's own
+       frame_id (front_left_camera_optical_frame), which has no tf frame in
+       this rig - only body->zed_front_camera exists. Republish both under
+       a fresh namespace with frame_id corrected, rather than colliding with
+       the original /front/zed_node/... topics (rviz's Camera display
+       expects an image_topic + a sibling .../camera_info). -->
   <node pkg="semantic_pointcloud" type="zed_decompress_node.py" name="zed_front_decompress">
     <remap from="~in" to="/front/zed_node/rgb/image_rect_color/compressed"/>
-    <remap from="~out" to="/front/zed_node/rgb/image_rect_color_raw"/>
+    <remap from="~out" to="/zed_front_camera/image_raw"/>
+    <param name="camera_info_in" value="/front/zed_node/rgb/camera_info"/>
+    <remap from="~camera_info_out" to="/zed_front_camera/camera_info"/>
   </node>
 
   <!-- same starting point as semantic_pointcloud_grape.launch's lidar2camera -
@@ -38,7 +47,9 @@
     <rosparam param="initial_rotation">[0.5, -0.5, 0.5, -0.5]</rosparam>
   </node>
 
-  <node launch-prefix="nixGLIntel nice" pkg="rviz" type="rviz" name="rviz"
-        args="-d $(dirname)/../config/rviz/extrinsic_tuning.rviz"/>
+  <group if="$(arg rviz)">
+    <node launch-prefix="nixGLIntel nice" pkg="rviz" type="rviz" name="rviz"
+          args="-d $(dirname)/../config/rviz/extrinsic_tuning.rviz"/>
+  </group>
 
 </launch>

@@ -73,7 +73,7 @@ Visualization Manager:
       Value: true
     - Class: rviz/Image
       Enabled: true
-      Image Topic: /front/zed_node/rgb/image_rect_color_raw
+      Image Topic: /zed_front_camera/image_raw
       Max Value: 1
       Median window: 5
       Min Value: 0
@@ -95,7 +95,7 @@ Visualization Manager:
     - Class: rviz/Camera
       Enabled: true
       Image Rendering: background and overlay
-      Image Topic: /front/zed_node/rgb/image_rect_color_raw
+      Image Topic: /zed_front_camera/image_raw
       Name: Camera Overlay
       Overlay Alpha: 0.5
       Queue Size: 2

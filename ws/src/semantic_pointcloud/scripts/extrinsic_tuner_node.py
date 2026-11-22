@@ -9,6 +9,8 @@ for a "Save" menu entry that appends the current translation+quaternion to
 "x y z qx qy qz qw" order a tf2_ros static_transform_publisher's args expect,
 ready to paste into a launch file.
 """
+import time
+
 import rospy
 import tf2_ros
 from geometry_msgs.msg import TransformStamped
@@ -59,7 +61,7 @@ class ExtrinsicTuner:
         self.server = InteractiveMarkerServer("extrinsic_tuner")
         self.buildMarker()
 
-        self.publishRate = rospy.Rate(rospy.get_param("~publish_rate", 30))
+        self.publishInterval = 1.0 / rospy.get_param("~publish_rate", 30)
 
     def buildMarker(self) -> None:
         marker = InteractiveMarker()
@@ -72,8 +74,11 @@ class ExtrinsicTuner:
 
         visual = InteractiveMarkerControl()
         visual.always_visible = True
+        visual.orientation.w = 1.0
         axisMarker = Marker()
         axisMarker.type = Marker.ARROW
+        axisMarker.pose.orientation.w = 1.0  # Marker() defaults to an invalid
+        # all-zero quaternion, not identity - renders nothing (or garbage) if left unset
         axisMarker.scale.x = 0.2
         axisMarker.scale.y = 0.04
         axisMarker.scale.z = 0.04
@@ -120,10 +125,14 @@ class ExtrinsicTuner:
         rospy.loginfo("ExtrinsicTuner: saved to %s: %s", self.outputPath, line.strip())
 
     def spin(self) -> None:
+        # plain wall-clock sleep, not rospy.Rate/rospy.sleep - the bag this is
+        # played against loops, and sim time jumping backwards at the loop
+        # point makes Rate.sleep() raise ROSTimeMovedBackwardsException; the
+        # tf broadcast cadence itself doesn't need to track sim time at all.
         while not rospy.is_shutdown():
             self.transform.header.stamp = rospy.Time.now()
             self.broadcaster.sendTransform(self.transform)
-            self.publishRate.sleep()
+            time.sleep(self.publishInterval)
 
 
 def main() -> None:
