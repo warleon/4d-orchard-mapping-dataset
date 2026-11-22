@@ -1,0 +1,107 @@
+<launch>
+<!-- faster-lio + semantic_pointcloud fusion for the grape rig: a 16-channel Ouster
+     already publishing decoded points (/os_cloud_node/points, /os_cloud_node/imu -
+     see mapping_ouster_grape.launch, no packet driver needed) and a ZED front
+     camera (/front/zed_node/rgb/image_rect_color/compressed + its own camera_info)
+     in place of the apple rig's raw-packet OS-0-128 + FLIR Spinnaker camera used by
+     semantic_pointcloud.launch.
+
+     Differences from semantic_pointcloud.launch:
+       - includes mapping_ouster_grape.launch (no ouster_ros driver/replay, no
+         metadata json - the bag's lidar points are already decoded)
+       - decompresses /front/zed_node/rgb/image_rect_color via image_transport
+         republish, since semantic_pointcloud_node only ever consumes raw
+         sensor_msgs/Image, never CompressedImage
+       - remaps that decompressed topic onto /spinnaker/image_raw (the topic name
+         hardcoded in ws/src/semantic_pointcloud/src/utils/listener_config.py -
+         roslaunch <remap> works regardless of it being a Python literal)
+       - the body->spinnaker static transform is replaced with body->zed_front_camera,
+         starting from identity; there is no existing calibrated extrinsic for this
+         camera, so this needs interactive tuning in rviz (watch the filtered cloud /
+         image alignment and adjust the args below, restarting each time) -->
+
+  <arg name="data_bag" default="$(dirname)/../../rosbag_compressed_2022-06-22-13-02-08.bag"
+       doc="bag with /os_cloud_node/points, /os_cloud_node/imu, /front/zed_node/rgb/image_rect_color/compressed"/>
+  <arg name="calib_file" default="$(dirname)/../dataset/zed-front-calib.yaml"
+       doc="pinhole intrinsics yaml for the ZED front camera, built from its own
+       camera_info (image_rect_color is already rectified, so distortion is zero)"/>
+  <arg name="rate" default="1.0" doc="bag playback rate"/>
+  <arg name="start_offset" default="0.0" doc="seconds into the bag to start
+       playback from (rosbag play --start)"/>
+  <arg name="play_delay" default="5"
+       doc="seconds to wait before playing the bag, so faster-lio is up before
+       lidar points start arriving"/>
+  <arg name="faster_lio_rviz" default="false"
+       doc="also show faster-lio's own rviz config (raw cloud/trajectory)"/>
+  <arg name="rviz" default="true"
+       doc="show config/rviz/semantic_pointcloud.rviz (odometry, image, filtered
+       point cloud, detection boxes)"/>
+  <arg name="half_window" default="1.5"
+       doc="seconds of /cloud_registered accumulated on each side of the
+       synced odometry/image pair's timestamp before it is published"/>
+  <arg name="display_rotation" default="0"
+       doc="number of 90-degree counter-clockwise turns applied to the published
+       image - the ZED is mounted upright, unlike the apple rig's rotated
+       Spinnaker; adjust if the preview comes out rotated"/>
+  <arg name="yolo_model_path" default="$(dirname)/../models/yolo_grape_berries_best_200.pt"
+       doc="path to a YOLO .pt checkpoint; leave empty to disable detection"/>
+  <arg name="yolo_confidence" default="0.75" doc="YOLO detection confidence threshold"/>
+  <arg name="cluster_gap_threshold" default="0.15"
+       doc="max depth gap (meters) within a single real-world cluster of a
+       detection's candidate points"/>
+  <arg name="image_topic" default="/semantic_pointcloud/image"/>
+  <arg name="point_cloud_topic" default="/semantic_pointcloud/points"/>
+  <arg name="boxes_topic" default="/semantic_pointcloud/boxes"/>
+  <arg name="mask_topic" default="/semantic_pointcloud/mask"/>
+  <arg name="detected_pointcloud_path" default="/tmp/semantic_pointcloud_detections.ply"/>
+  <arg name="export_voxel_size" default="0.02"/>
+  <arg name="export_interval" default="30.0"/>
+  <arg name="max_duration" default="0.0"/>
+
+  <include file="$(dirname)/mapping_ouster_grape.launch">
+    <arg name="rviz" value="$(arg faster_lio_rviz)"/>
+  </include>
+
+  <!-- body->zed_front_camera extrinsic placeholder - no calibrated value exists
+       for this rig yet. Tune translation (meters) first, then rotation
+       (quaternion) last, watching rviz's filtered cloud / image alignment. -->
+  <node pkg="tf2_ros" type="static_transform_publisher" name="lidar2camera"
+        args="0 0 0 0 0 0 1 body zed_front_camera"/>
+
+  <node pkg="image_transport" type="republish" name="zed_front_decompress"
+        args="compressed in:=/front/zed_node/rgb/image_rect_color raw out:=/front/zed_node/rgb/image_rect_color_raw"/>
+
+  <param name="use_sim_time" value="true"/>
+  <node pkg="rosbag" type="play" name="data_bag_player" output="screen" required="true"
+        launch-prefix="bash -c 'sleep $(arg play_delay); $0 $@' "
+        args="--clock $(arg data_bag) --rate $(arg rate) --start $(arg start_offset)"/>
+
+  <node pkg="semantic_pointcloud" type="semantic_pointcloud_node.py"
+        name="semantic_pointcloud_node" output="screen" launch-prefix="nice -n 10">
+    <remap from="/spinnaker/image_raw" to="/front/zed_node/rgb/image_rect_color_raw"/>
+    <param name="calibration_path" value="$(arg calib_file)"/>
+    <param name="camera_frame" value="zed_front_camera"/>
+    <param name="half_window" value="$(arg half_window)"/>
+    <param name="display_rotation" value="$(arg display_rotation)"/>
+    <param name="yolo_model_path" value="$(arg yolo_model_path)"/>
+    <param name="yolo_confidence" value="$(arg yolo_confidence)"/>
+    <param name="detection_labeler/cluster_gap_threshold" value="$(arg cluster_gap_threshold)"/>
+    <param name="image_topic" value="$(arg image_topic)"/>
+    <param name="point_cloud_topic" value="$(arg point_cloud_topic)"/>
+    <param name="boxes_topic" value="$(arg boxes_topic)"/>
+    <param name="mask_topic" value="$(arg mask_topic)"/>
+    <param name="detected_pointcloud_path" value="$(arg detected_pointcloud_path)"/>
+    <param name="export_voxel_size" value="$(arg export_voxel_size)"/>
+    <param name="export_interval" value="$(arg export_interval)"/>
+    <param name="max_duration" value="$(arg max_duration)"/>
+  </node>
+
+  <group if="$(arg rviz)">
+    <!-- nixGLIntel: only needed on an Intel-GPU Nix devShell like the local
+         machine's; on a dedicated GPU box like anthony-gpu this prefix is
+         likely unnecessary or wrong - check `which nixGLIntel` first. -->
+    <node launch-prefix="nixGLIntel nice" pkg="rviz" type="rviz" name="semantic_pointcloud_rviz"
+          args="-d $(dirname)/../config/rviz/semantic_pointcloud.rviz"/>
+  </group>
+
+</launch>

@@ -1,0 +1,7 @@
+cam0:
+  camera_model: pinhole
+  intrinsics: [1057.0008544921875, 1057.0008544921875, 952.2301635742188, 553.5770263671875]
+  distortion_model: radtan
+  distortion_coeffs: [0.0, 0.0, 0.0, 0.0]
+  resolution: [1080, 1920]
+  rostopic: /front/zed_node/rgb/image_rect_color_raw
