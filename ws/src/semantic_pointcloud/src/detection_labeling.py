@@ -45,6 +45,16 @@ class DetectionLabeler:
         instance color.
         """
         boxes, masks = self.detector.detect(image)
+        maskImage = (image.clamp(0, 1) * 255).byte().permute(1, 2, 0).contiguous()
+        instanceIds = torch.full((points.shape[0],), -1.0, device=self.device)
+
+        # ultralytics returns masks=None (not an empty Masks) on a frame with
+        # zero detections, even for a segmentation-task model - nothing to
+        # label this frame.
+        if masks is None:
+            rospy.loginfo_throttle(5.0, "DetectionLabeler: no detections this frame")
+            return instanceIds, [], maskImage
+
         assert boxes.data.shape[0] == masks.data.shape[0]
         rospy.loginfo(
             "DetectionLabeler: %d detection(s) this frame", masks.data.shape[0]
@@ -57,12 +67,9 @@ class DetectionLabeler:
             self.camera.width,
             self.camera.height,
         )
-        instanceIds = torch.full((points.shape[0],), -1.0, device=self.device)
         depths, inBounds, maskPixelX, maskPixelY = self.projectToMaskSpace(
             points, masks
         )
-
-        maskImage = (image.clamp(0, 1) * 255).byte().permute(1, 2, 0).contiguous()
 
         boxes3D = []
         for i in range(boxes.data.shape[0]):
@@ -208,21 +215,32 @@ class DetectionLabeler:
         clusterEnd = int(seams[0]) + 1 if seams.numel() else sortedDepths.shape[0]
         return sortedDepths[:clusterEnd].mean()
 
+    def closestPointDepth(self, candidateDepths: torch.Tensor) -> torch.Tensor:
+        """Depth of the single nearest-to-camera point among candidateDepths.
+
+        Simpler and more conservative than closestClusterDepth's nearest-
+        cluster mean: no gap-threshold tuning, just the literal closest hit -
+        at the cost of being more sensitive to a single noisy/outlier point.
+        """
+        return candidateDepths.min()
+
     def extrudeToBox3D(
         self, box: torch.Tensor, candidateDepths: torch.Tensor, instanceId: int
     ) -> Box3D:
         # a 2D box alone can't tell a close object from distant background
-        # sharing the same pixels apart - place it at its candidates' own
-        # nearest depth cluster, sized to match there, and extrude it into a
-        # cuboid as thick as its largest side.
+        # sharing the same pixels apart - size it to match at its nearest
+        # candidate point, and extrude it into a cuboid as thick as its
+        # largest side.
         x1, y1, x2, y2, _conf, cls = box
-        referenceDepth = self.closestClusterDepth(candidateDepths)
-        width, height = self.camera.pixelSizeToWorldSize(
-            x2 - x1, y2 - y1, referenceDepth
-        )
+        nearDepth = self.closestPointDepth(candidateDepths)
+        width, height = self.camera.pixelSizeToWorldSize(x2 - x1, y2 - y1, nearDepth)
         thickness = torch.maximum(width, height)
+        # nearDepth is the box's near face, not its centroid - push the
+        # center back by half the thickness so nearDepth ends up on the
+        # box's boundary instead of buried at its middle.
+        centerDepth = nearDepth + thickness / 2
         cameraSpaceCenter = self.camera.pixelToCameraSpace(
-            (x1 + x2) / 2, (y1 + y2) / 2, referenceDepth
+            (x1 + x2) / 2, (y1 + y2) / 2, centerDepth
         )
         worldCenter = self.camera.toWorldSpace(cameraSpaceCenter.unsqueeze(0))[0]
         extents = torch.stack([width, height, thickness])
