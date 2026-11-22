@@ -76,10 +76,16 @@
   </include>
 
   <!-- body->zed_front_camera extrinsic placeholder - no calibrated value exists
-       for this rig yet. Tune translation (meters) first, then rotation
-       (quaternion) last, watching rviz's filtered cloud / image alignment. -->
+       for this rig yet. Translation is a blind guess (0,0,0 - no rig
+       measurements available); the rotation below is NOT a guess, though -
+       it's the standard ROS optical-frame convention (camera: X right,
+       Y down, Z forward) expressed in the body frame (X forward, Y left,
+       Z up), for a camera mounted upright and facing the same way as the
+       lidar (consistent with display_rotation=0 above). Tune translation
+       first, then rotation, watching rviz's filtered cloud / image
+       alignment, restarting after each edit. -->
   <node pkg="tf2_ros" type="static_transform_publisher" name="lidar2camera"
-        args="0 0 0 0 0 0 1 body zed_front_camera"/>
+        args="0 0 0 0.5 -0.5 0.5 -0.5 body zed_front_camera"/>
 
   <node pkg="semantic_pointcloud" type="zed_decompress_node.py" name="zed_front_decompress">
     <remap from="~in" to="/front/zed_node/rgb/image_rect_color/compressed"/>
