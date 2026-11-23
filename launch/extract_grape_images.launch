@@ -6,20 +6,18 @@
      bag played live, same as semantic_pointcloud_grape.launch - just
      without YOLO/rviz, since extraction only needs odometry+cloud+image.
 
-     extract_image.py itself isn't included as a <node> here: it's a plain
-     script/ at the repo root, not part of any catkin package, and
+     extract_image.py itself isn't included as a node here: it's a plain
+     script at the repo root, not part of any catkin package, and
      roslaunch's node resolution can't launch an arbitrary absolute path (it
      only searches a named package's own installed executables) - run it
-     separately once this is up, e.g.:
-       python3 script/extract_image.py --output_dir ~/grape_extracted \
-         --image_topic /front/zed_node/rgb/image_rect_color_raw \
-         --rotate 0 --offset 30 --num_images 20 -->
+     separately once this is up. See script/extract_image.py's own
+     docstring/flags (output_dir, image_topic, rotate, offset, num_images). -->
 
   <arg name="data_bag" default="$(dirname)/../../rosbag_compressed_2022-06-22-13-02-08.bag"/>
   <arg name="rate" default="0.5"
        doc="faster-lio falls behind real time at rate 1.0, growing the
-       image/cloud timestamp gap unboundedly (see extract_image.py's own
-       docstring) - 0.5 keeps it bounded on this project's dev machines"/>
+       image slash cloud timestamp gap unboundedly (see extract_image.py's
+       own docstring); 0.5 keeps it bounded on this project's dev machines"/>
   <arg name="play_delay" default="5"/>
 
   <include file="$(dirname)/mapping_ouster_grape.launch">
