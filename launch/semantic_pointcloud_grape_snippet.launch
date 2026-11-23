@@ -8,6 +8,10 @@
      there and runs detection on top, same as the real pipeline otherwise. -->
 
   <arg name="bag" default="$(dirname)/../dataset/grape_zed_tuning_snippet.bag"/>
+  <arg name="rate" default="0.2" doc="bag playback rate - tiled YOLO inference
+       (28 passes/frame) doesn't keep up with real-time (rate 1.0) playback,
+       so this defaults slow enough for semantic_pointcloud_node to actually
+       keep pace with what rviz is displaying"/>
   <arg name="calib_file" default="$(dirname)/../dataset/zed-front-calib.yaml"/>
   <arg name="half_window" default="1.5"/>
   <arg name="display_rotation" default="0"/>
@@ -21,7 +25,7 @@
 
   <param name="use_sim_time" value="true"/>
   <node pkg="rosbag" type="play" name="snippet_player" output="screen"
-        args="--clock --loop $(arg bag)"/>
+        args="--clock --loop --rate $(arg rate) $(arg bag)"/>
 
   <!-- same starting point confirmed good by eye in tune_zed_extrinsic.launch -->
   <node pkg="tf2_ros" type="static_transform_publisher" name="lidar2camera"
