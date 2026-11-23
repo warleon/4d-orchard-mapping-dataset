@@ -1,0 +1,54 @@
+<launch>
+<!-- Full semantic_pointcloud detection pipeline against the recorded 15s
+     snippet (dataset/grape_zed_tuning_snippet.bag), run locally for taking
+     rviz screenshots - no remote GPU box needed. The snippet already has
+     /tf + /cloud_registered recorded from a real faster-lio run on the full
+     bag, so unlike semantic_pointcloud_grape.launch this does NOT re-run
+     faster-lio/mapping_ouster_grape.launch - just replays what's already
+     there and runs detection on top, same as the real pipeline otherwise. -->
+
+  <arg name="bag" default="$(dirname)/../dataset/grape_zed_tuning_snippet.bag"/>
+  <arg name="calib_file" default="$(dirname)/../dataset/zed-front-calib.yaml"/>
+  <arg name="half_window" default="1.5"/>
+  <arg name="display_rotation" default="0"/>
+  <arg name="yolo_model_path" default="$(env HOME)/Projects/macanudo/models/yolo-grape-berries/best_200.pt"/>
+  <arg name="yolo_confidence" default="0.75"/>
+  <arg name="tile_size" default="320"/>
+  <arg name="tile_overlap" default="0.1"/>
+  <arg name="cluster_gap_threshold" default="0.15"/>
+  <arg name="rviz" default="true"/>
+  <arg name="rviz_launch_prefix" default="nixGLIntel nice"/>
+
+  <param name="use_sim_time" value="true"/>
+  <node pkg="rosbag" type="play" name="snippet_player" output="screen"
+        args="--clock --loop $(arg bag)"/>
+
+  <!-- same starting point confirmed good by eye in tune_zed_extrinsic.launch -->
+  <node pkg="tf2_ros" type="static_transform_publisher" name="lidar2camera"
+        args="0 0 0 0.5 -0.5 0.5 -0.5 body zed_front_camera"/>
+
+  <node pkg="semantic_pointcloud" type="zed_decompress_node.py" name="zed_front_decompress">
+    <remap from="~in" to="/front/zed_node/rgb/image_rect_color/compressed"/>
+    <remap from="~out" to="/front/zed_node/rgb/image_rect_color_raw"/>
+  </node>
+
+  <node pkg="semantic_pointcloud" type="semantic_pointcloud_node.py"
+        name="semantic_pointcloud_node" output="screen" launch-prefix="nice -n 10">
+    <remap from="/spinnaker/image_raw" to="/front/zed_node/rgb/image_rect_color_raw"/>
+    <param name="calibration_path" value="$(arg calib_file)"/>
+    <param name="camera_frame" value="zed_front_camera"/>
+    <param name="half_window" value="$(arg half_window)"/>
+    <param name="display_rotation" value="$(arg display_rotation)"/>
+    <param name="yolo_model_path" value="$(arg yolo_model_path)"/>
+    <param name="yolo_confidence" value="$(arg yolo_confidence)"/>
+    <param name="tile_size" value="$(arg tile_size)"/>
+    <param name="tile_overlap" value="$(arg tile_overlap)"/>
+    <param name="detection_labeler/cluster_gap_threshold" value="$(arg cluster_gap_threshold)"/>
+  </node>
+
+  <group if="$(arg rviz)">
+    <node launch-prefix="$(arg rviz_launch_prefix)" pkg="rviz" type="rviz" name="semantic_pointcloud_rviz"
+          args="-d $(dirname)/../config/rviz/semantic_pointcloud.rviz"/>
+  </group>
+
+</launch>
