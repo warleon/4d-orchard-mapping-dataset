@@ -1,0 +1,39 @@
+<launch>
+<!-- Infra half of script/extract_image.py's documented 3-terminal workflow
+     (mapping_ouster128_with_driver.launch + rosbag play), adapted for the
+     grape rig: faster-lio's own /Odometry and /cloud_registered only exist
+     while laserMapping is actually running, so extraction needs the full
+     bag played live, same as semantic_pointcloud_grape.launch - just
+     without YOLO/rviz, since extraction only needs odometry+cloud+image.
+
+     extract_image.py itself isn't included as a <node> here: it's a plain
+     script/ at the repo root, not part of any catkin package, and
+     roslaunch's node resolution can't launch an arbitrary absolute path (it
+     only searches a named package's own installed executables) - run it
+     separately once this is up, e.g.:
+       python3 script/extract_image.py --output_dir ~/grape_extracted \
+         --image_topic /front/zed_node/rgb/image_rect_color_raw \
+         --rotate 0 --offset 30 --num_images 20 -->
+
+  <arg name="data_bag" default="$(dirname)/../../rosbag_compressed_2022-06-22-13-02-08.bag"/>
+  <arg name="rate" default="0.5"
+       doc="faster-lio falls behind real time at rate 1.0, growing the
+       image/cloud timestamp gap unboundedly (see extract_image.py's own
+       docstring) - 0.5 keeps it bounded on this project's dev machines"/>
+  <arg name="play_delay" default="5"/>
+
+  <include file="$(dirname)/mapping_ouster_grape.launch">
+    <arg name="rviz" value="false"/>
+  </include>
+
+  <node pkg="semantic_pointcloud" type="zed_decompress_node.py" name="zed_front_decompress">
+    <remap from="~in" to="/front/zed_node/rgb/image_rect_color/compressed"/>
+    <remap from="~out" to="/front/zed_node/rgb/image_rect_color_raw"/>
+  </node>
+
+  <param name="use_sim_time" value="true"/>
+  <node pkg="rosbag" type="play" name="data_bag_player" output="screen" required="true"
+        launch-prefix="bash -c 'sleep $(arg play_delay); $0 $@' "
+        args="--clock $(arg data_bag) --rate $(arg rate)"/>
+
+</launch>

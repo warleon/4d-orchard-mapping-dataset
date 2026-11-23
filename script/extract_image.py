@@ -26,6 +26,7 @@ raise --pc_max_age; occasional skips are expected and non-fatal."""
 
 import argparse
 import os
+import sys
 
 import cv2
 import message_filters
@@ -41,6 +42,16 @@ from utils import modifyPcMsgFields, pcMsg2NumpyXYZL
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--rotate",
+        type=int,
+        default=1,
+        choices=[0, 1, 2, 3],
+        help="number of 90-degree counter-clockwise turns applied to each "
+        "saved image (np.rot90's k) - 1 matches the apple rig's rotated "
+        "Spinnaker mount (this script's long-standing default); use 0 for an "
+        "upright camera like the grape rig's ZED",
+    )
     parser.add_argument(
         "--output_dir",
         required=True,
@@ -80,7 +91,10 @@ def parse_args():
         "but spikes with momentary system load even at --rate 0.5, hence the "
         "margin; if misses are still frequent, lower rosbag play's --rate",
     )
-    return parser.parse_args()
+    # strips roslaunch's auto-appended __name:=/__log:=/remap-style args, so
+    # this also runs fine as a plain roslaunch <node> instead of only a
+    # hand-invoked script - argparse errors on them otherwise
+    return parser.parse_args(rospy.myargv(sys.argv)[1:])
 
 
 def odom_to_dict(odom_msg):
@@ -130,7 +144,8 @@ class ImageExtractor:
             return
 
         image = self.bridge.imgmsg_to_cv2(img_msg, "bgr8")
-        image = np.rot90(image)
+        if self.args.rotate:
+            image = np.rot90(image, k=self.args.rotate)
 
         sample_dir = os.path.join(self.args.output_dir, f"{self.count:06d}")
         os.makedirs(sample_dir, exist_ok=True)
